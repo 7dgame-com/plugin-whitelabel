@@ -18,18 +18,23 @@
     </el-card>
 
     <el-card shadow="never" class="workspace-card">
-      <el-tabs v-model="activeTab" class="workspace-tabs">
-        <el-tab-pane name="organizations">
+      <el-tabs
+        v-if="user"
+        :key="sessionScopeKey"
+        v-model="activeTab"
+        class="workspace-tabs"
+      >
+        <el-tab-pane name="organizations" lazy>
           <template #label>
             <span class="tab-label">
               <OfficeBuilding />
               {{ t('organization.title') }}
             </span>
           </template>
-          <OrganizationConfigsPanel v-if="activeTab === 'organizations'" />
+          <OrganizationConfigsPanel />
         </el-tab-pane>
 
-        <el-tab-pane name="domains">
+        <el-tab-pane name="domains" lazy>
           <template #label>
             <span class="tab-label">
               <Connection />
@@ -39,17 +44,17 @@
               </el-tag>
             </span>
           </template>
-          <DomainConfigsPanel v-if="activeTab === 'domains'" />
+          <DomainConfigsPanel />
         </el-tab-pane>
 
-        <el-tab-pane name="assignments">
+        <el-tab-pane name="assignments" lazy>
           <template #label>
             <span class="tab-label">
               <Link />
               {{ t('assignment.title') }}
             </span>
           </template>
-          <AssignmentsPanel v-if="activeTab === 'assignments'" />
+          <AssignmentsPanel />
         </el-tab-pane>
       </el-tabs>
     </el-card>
@@ -57,7 +62,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import {
   Connection,
   Link,
@@ -69,13 +74,16 @@ import AssignmentsPanel from '../components/AssignmentsPanel.vue'
 import DomainConfigsPanel from '../components/DomainConfigsPanel.vue'
 import OrganizationConfigsPanel from '../components/OrganizationConfigsPanel.vue'
 import { useAuthSession } from '../composables/useAuthSession'
+import { buildSessionScopeKey } from '../domain/sessionScope'
 
 const { t } = useI18n()
-const { isRootUser } = useAuthSession()
+const { isRootUser, user } = useAuthSession()
 const route = useRoute()
 const router = useRouter()
 const tabs = ['organizations', 'domains', 'assignments'] as const
 type WorkspaceTab = (typeof tabs)[number]
+
+const sessionScopeKey = computed(() => buildSessionScopeKey(user.value))
 
 function isWorkspaceTab(value: unknown): value is WorkspaceTab {
   return tabs.includes(value as WorkspaceTab)

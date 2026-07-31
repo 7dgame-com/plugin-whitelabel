@@ -102,4 +102,18 @@ describe('deployment contracts', () => {
     expect(domainDialog).not.toContain('Object.assign')
     expect(domainPanel).toContain('v-if="isRootUser"')
   })
+
+  it('loads each workspace tab once and preserves it after switching away', () => {
+    const workspace = read('../views/WhiteLabelWorkspace.vue')
+
+    expect(workspace.match(/<el-tab-pane name="[^"]+" lazy>/g)).toHaveLength(
+      3,
+    )
+    expect(workspace).not.toContain('v-if="activeTab ===')
+    expect(workspace).toContain('v-if="user"')
+    expect(workspace).toContain(':key="sessionScopeKey"')
+    expect(workspace).toContain('<OrganizationConfigsPanel />')
+    expect(workspace).toContain('<DomainConfigsPanel />')
+    expect(workspace).toContain('<AssignmentsPanel />')
+  })
 })
