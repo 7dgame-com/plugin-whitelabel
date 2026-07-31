@@ -21,8 +21,13 @@ CREATE TABLE IF NOT EXISTS `white_label_organization_config` (
 
 CREATE TABLE IF NOT EXISTS `white_label_domain_config` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  -- Legacy physical name retained for compatibility. Semantics: the lowercase
+  -- main-frontend StaticDomainConfig key exposed by the API as `configKey`.
   `domain` VARCHAR(253) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  -- Read-only projection derived from config_json.description, falling back to
+  -- config_json.name. Clients do not submit this value.
   `display_name` VARCHAR(191) NOT NULL,
+  -- Complete snapshot of web/public/config/domains/<configKey>.json.
   `config_json` JSON NOT NULL,
   `schema_version` INT UNSIGNED NOT NULL DEFAULT 1,
   `revision` BIGINT UNSIGNED NOT NULL DEFAULT 1,

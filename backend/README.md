@@ -3,12 +3,24 @@
 This service owns three independently versioned resources:
 
 - organization JSON, keyed by the main platform's numeric organization id;
-- domain JSON, keyed by a plugin-owned numeric domain id;
+- a domain-family JSON snapshot with main-frontend `StaticDomainConfig` semantics,
+  keyed externally by a plugin-owned numeric domain id;
 - an organization/domain assignment with publish state but no JSON.
 
 The service has no dependency on the main platform database. It validates the
 main-platform session on every management request and exposes one token-protected
-read-only resolve endpoint for `yii3-a1`.
+read-only resolve endpoint intended for `yii3-a1`.
+
+The domain resource does not represent one exact request hostname. Its
+`configKey` is derived from `config.name` and identifies the same domain family
+as a main-frontend file such as `web/public/config/domains/dev.xrugc.com.json`.
+For example, the main frontend can resolve `d.dev.xrugc.com` through the
+`dev.xrugc.com` key. The numeric `domainId` remains the short, stable value used
+by QR parameter `d`.
+
+The plugin stores an independent full snapshot. It neither reads nor writes the
+main frontend's static files at runtime. Publishing the same key to the main
+frontend is a separate change and deployment.
 
 ## Security boundaries
 
@@ -23,8 +35,9 @@ read-only resolve endpoint for `yii3-a1`.
   `/v1/organization/list` endpoint. Neither role trusts request-body snapshots.
 - Organization titles follow the main platform's 255-character limit. Domain
   display names remain limited to 191 characters.
-- Domain hostnames are canonicalized to lowercase, must contain at least two DNS
-  labels, and cannot be localhost, an IP address, wildcard, scheme, path, or port.
+- A domain `configKey` is globally unique, follows the static domain-config key
+  grammar, and must exactly match `config.name`. It is never derived from an HTTP
+  Host header. `displayName` is a read-only projection of `config.description`.
 - Internal resolve requires `X-Internal-Token`. Missing, invalid, disabled, or
   partially disabled combinations all return the same `404`.
 - Organization and domain JSON reject secret-bearing field names and are
@@ -36,6 +49,16 @@ read-only resolve endpoint for `yii3-a1`.
   `revision`.
 - QR URLs use only fixed `A1_PUBLIC_BASE_URL`; request headers cannot alter them.
   Production startup requires this URL to use HTTPS.
+
+Organization and domain JSON use separate versioned schemas. Organization schema
+v1 requires a top-level object. Domain schema v1 validates the
+`StaticDomainConfig` shape and the invariant `config.name === configKey`. A
+schema change on one resource never changes the other resource.
+
+Only `schemaVersion: 1` is implemented and accepted. A domain snapshot must be
+self-contained for Unity. `fallback_domain` is preserved as format-compatible
+metadata, but the plugin and A1 never dereference it at runtime; a pure external
+fallback document with empty `default_config` and `configs` is rejected.
 
 ## Management API
 
@@ -68,6 +91,25 @@ New resources are always disabled. There is no hard-delete endpoint.
 Assignment responses include organization and domain display summaries for the UI
 and a `qrUrl` generated from the fixed A1 origin, while retaining full audit fields.
 
+Domain create input contains `configKey`, `schemaVersion`, and the full `config`
+snapshot; update additionally contains `revision`. Clients do not submit
+`displayName` or a request hostname:
+
+```json
+{
+  "configKey": "dev.xrugc.com",
+  "schemaVersion": 1,
+  "config": {
+    "name": "dev.xrugc.com",
+    "description": "XR UGC Dev",
+    "is_active": true,
+    "fallback_domain": "default",
+    "default_config": {},
+    "configs": {}
+  }
+}
+```
+
 ## Internal API
 
 ```http
@@ -91,16 +133,28 @@ domain config are all enabled:
   },
   "domain": {
     "id": 34,
-    "host": "ar.acme.example",
+    "configKey": "dev.xrugc.com",
     "revision": 2,
     "schemaVersion": 1,
-    "config": {}
+    "config": {
+      "name": "dev.xrugc.com",
+      "description": "XR UGC Dev",
+      "is_active": true,
+      "fallback_domain": "default",
+      "default_config": {},
+      "configs": {}
+    }
   }
 }
 ```
 
 ETag incorporates assignment, organization, and domain revisions, so independent
 JSON updates correctly invalidate caches. `If-None-Match` returns `304`.
+
+The `yii3-a1` white-label route is currently a draft contract and has not been
+deployed. This repository defines the internal side of that integration, but a QR
+URL is not end-to-end usable until A1 implements and publishes the public route.
+There is no `yii3-a3` service in this design.
 
 ## Run
 

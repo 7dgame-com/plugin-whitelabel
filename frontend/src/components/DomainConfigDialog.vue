@@ -15,41 +15,12 @@
       class="dialog-boundary"
     />
 
-    <el-form
-      ref="formRef"
-      :model="form"
-      :rules="rules"
-      label-position="top"
-    >
-      <div class="form-grid">
-        <el-form-item :label="t('domain.displayName')" prop="displayName">
-          <el-input
-            v-model="form.displayName"
-            maxlength="191"
-            show-word-limit
-            :placeholder="t('domain.displayNamePlaceholder')"
-          />
-        </el-form-item>
-
-        <el-form-item :label="t('domain.hostname')" prop="domain">
-          <el-input
-            v-model="form.domain"
-            autocomplete="off"
-            :placeholder="t('domain.hostnamePlaceholder')"
-            @blur="normalizeDomain"
-          />
-        </el-form-item>
-      </div>
-
+    <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
       <el-form-item :label="t('domain.json')" prop="json">
-        <el-input
+        <JsonObjectEditor
           v-model="form.json"
-          type="textarea"
-          :rows="15"
-          resize="vertical"
-          spellcheck="false"
-          class="json-editor"
-          :placeholder="t('common.jsonPlaceholder')"
+          schema="domain"
+          :aria-label="t('domain.json')"
         />
       </el-form-item>
     </el-form>
@@ -69,14 +40,12 @@
 import { reactive, ref, watch } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { useI18n } from 'vue-i18n'
+import JsonObjectEditor from './JsonObjectEditor.vue'
 import type {
   DomainConfigRecord,
-  JsonObject,
+  StaticDomainConfig,
 } from '../domain/types'
-import {
-  hostnameValidationMessage,
-  normalizeHostname,
-} from '../domain/domainName'
+import { validateJsonObjectText } from '../domain/jsonObject'
 
 const props = defineProps<{
   visible: boolean
@@ -86,38 +55,16 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:visible': [visible: boolean]
-  submit: [value: { domain: string; displayName: string; config: JsonObject }]
+  submit: [value: { configKey: string; config: StaticDomainConfig }]
 }>()
 
 const { t } = useI18n()
 const formRef = ref<FormInstance>()
 const form = reactive({
-  domain: '',
-  displayName: '',
-  json: '{}',
+  json: JSON.stringify(emptyDomainConfig(), null, 2),
 })
 
 const rules: FormRules = {
-  displayName: [
-    {
-      required: true,
-      message: () => t('common.required'),
-      trigger: 'blur',
-    },
-  ],
-  domain: [
-    {
-      validator: (
-        _rule: unknown,
-        value: string,
-        callback: (error?: Error) => void,
-      ) => {
-        const message = hostnameValidationMessage(value)
-        callback(message ? new Error(message) : undefined)
-      },
-      trigger: ['blur', 'change'],
-    },
-  ],
   json: [
     {
       required: true,
@@ -127,28 +74,33 @@ const rules: FormRules = {
   ],
 }
 
+function emptyDomainConfig(): StaticDomainConfig {
+  return {
+    name: '',
+    description: '',
+    is_active: true,
+    fallback_domain: null,
+    default_config: {},
+    configs: {},
+  }
+}
+
 function reset(): void {
-  form.domain = props.record?.domain ?? ''
-  form.displayName = props.record?.displayName ?? ''
-  form.json = JSON.stringify(props.record?.config ?? {}, null, 2)
+  form.json = JSON.stringify(
+    props.record?.config ?? emptyDomainConfig(),
+    null,
+    2,
+  )
   formRef.value?.clearValidate()
 }
 
-function normalizeDomain(): void {
-  form.domain = normalizeHostname(form.domain)
-}
-
-function parseJson(): JsonObject | null {
-  try {
-    const parsed = JSON.parse(form.json) as unknown
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error('Expected object')
-    }
-    return parsed as JsonObject
-  } catch {
+function parseJson(): StaticDomainConfig | null {
+  const parsed = validateJsonObjectText(form.json, 'domain')
+  if (!parsed.valid) {
     ElMessage.error(t('common.jsonInvalid'))
     return null
   }
+  return parsed.value
 }
 
 async function submit(): Promise<void> {
@@ -157,10 +109,13 @@ async function submit(): Promise<void> {
   if (!valid) return
   const config = parseJson()
   if (!config) return
+  if (props.record?.enabled && !config.is_active) {
+    ElMessage.error(t('domain.disableBeforeInactive'))
+    return
+  }
 
   emit('submit', {
-    domain: normalizeHostname(form.domain),
-    displayName: form.displayName.trim(),
+    configKey: config.name,
     config,
   })
 }

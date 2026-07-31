@@ -1,5 +1,5 @@
 import type { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
-import { conflict, notFound } from './errors';
+import { conflict, notFound, unprocessable } from './errors';
 import type {
   Assignment,
   DomainConfig,
@@ -13,6 +13,7 @@ import type {
   OrganizationConfigUpdate,
   OrganizationScope,
   ResolvedWhiteLabel,
+  StaticDomainConfig,
   VersionedMutationResult,
   WhiteLabelRepository,
 } from './types';
@@ -87,8 +88,12 @@ function mysqlCode(error: unknown): string | undefined {
     : undefined;
 }
 
-function parseJson(value: string | JsonObject): JsonObject {
-  return typeof value === 'string' ? JSON.parse(value) as JsonObject : value;
+function parseJson<Value extends JsonObject = JsonObject>(value: string | JsonObject): Value {
+  return (typeof value === 'string' ? JSON.parse(value) : value) as Value;
+}
+
+function domainDisplayName(config: StaticDomainConfig): string {
+  return config.description.trim() || config.name;
 }
 
 function toIsoUtc(value: string): string {
@@ -123,11 +128,12 @@ function mapOrganization(row: OrganizationRow): OrganizationConfig {
 }
 
 function mapDomain(row: DomainRow): DomainConfig {
+  const config = parseJson<StaticDomainConfig>(row.config_json);
   return {
     domainId: Number(row.id),
-    domain: row.domain,
+    configKey: row.domain,
     displayName: row.display_name,
-    config: parseJson(row.config_json),
+    config,
     schemaVersion: Number(row.schema_version),
     revision: Number(row.revision),
     enabled: Boolean(row.is_enabled),
@@ -148,7 +154,7 @@ function mapAssignment(row: AssignmentRow): Assignment {
       enabled: Boolean(row.organization_enabled),
     },
     domain: {
-      host: row.domain,
+      configKey: row.domain,
       displayName: row.display_name,
       enabled: Boolean(row.domain_enabled),
     },
@@ -169,10 +175,10 @@ function mapResolved(row: ResolvedRow): ResolvedWhiteLabel {
     },
     domain: {
       id: Number(row.domain_id),
-      host: row.domain,
+      configKey: row.domain,
       revision: Number(row.domain_revision),
       schemaVersion: Number(row.domain_schema_version),
-      config: parseJson(row.domain_config_json),
+      config: parseJson<StaticDomainConfig>(row.domain_config_json),
     },
   };
 }
@@ -400,8 +406,8 @@ export class MysqlWhiteLabelRepository implements WhiteLabelRepository {
           is_enabled, created_by, updated_by
         ) VALUES (?, ?, ?, ?, 1, 0, ?, ?)`,
         [
-          input.domain,
-          input.displayName,
+          input.config.name,
+          domainDisplayName(input.config),
           JSON.stringify(input.config),
           input.schemaVersion,
           actorId,
@@ -410,7 +416,7 @@ export class MysqlWhiteLabelRepository implements WhiteLabelRepository {
       );
     } catch (error) {
       if (mysqlCode(error) === 'ER_DUP_ENTRY') {
-        throw conflict('DOMAIN_CONFIG_CONFLICT', 'The domain is already configured');
+        throw conflict('DOMAIN_CONFIG_CONFLICT', 'The domain config key is already configured');
       }
       throw error;
     }
@@ -434,6 +440,26 @@ export class MysqlWhiteLabelRepository implements WhiteLabelRepository {
     input: DomainConfigUpdate,
     actorId: string,
   ): Promise<VersionedMutationResult<DomainConfig>> {
+    const currentBeforeUpdate = await this.findDomainConfig(domainId);
+    if (!currentBeforeUpdate) {
+      return { kind: 'not_found' };
+    }
+    if (currentBeforeUpdate.revision !== input.revision) {
+      return {
+        kind: 'revision_conflict',
+        currentRevision: currentBeforeUpdate.revision,
+      };
+    }
+    if (currentBeforeUpdate.enabled && !input.config.is_active) {
+      throw unprocessable(
+        'Disable the domain configuration before saving a snapshot with config.is_active=false',
+        [{
+          path: 'config.is_active',
+          message: 'config.is_active must remain true while the plugin domain configuration is enabled',
+        }],
+      );
+    }
+
     let result: ResultSetHeader;
     try {
       [result] = await this.pool.execute<ResultSetHeader>(
@@ -442,8 +468,8 @@ export class MysqlWhiteLabelRepository implements WhiteLabelRepository {
              revision = revision + 1, updated_by = ?, updated_at = CURRENT_TIMESTAMP(3)
          WHERE id = ? AND revision = ?`,
         [
-          input.domain,
-          input.displayName,
+          input.config.name,
+          domainDisplayName(input.config),
           JSON.stringify(input.config),
           input.schemaVersion,
           actorId,
@@ -453,7 +479,7 @@ export class MysqlWhiteLabelRepository implements WhiteLabelRepository {
       );
     } catch (error) {
       if (mysqlCode(error) === 'ER_DUP_ENTRY') {
-        throw conflict('DOMAIN_CONFIG_CONFLICT', 'The domain is already configured');
+        throw conflict('DOMAIN_CONFIG_CONFLICT', 'The domain config key is already configured');
       }
       throw error;
     }
@@ -473,6 +499,29 @@ export class MysqlWhiteLabelRepository implements WhiteLabelRepository {
     enabled: boolean,
     actorId: string,
   ): Promise<VersionedMutationResult<DomainConfig>> {
+    const currentBeforeUpdate = await this.findDomainConfig(domainId);
+    if (!currentBeforeUpdate) {
+      return { kind: 'not_found' };
+    }
+    if (currentBeforeUpdate.revision !== expectedRevision) {
+      return {
+        kind: 'revision_conflict',
+        currentRevision: currentBeforeUpdate.revision,
+      };
+    }
+    if (enabled && !currentBeforeUpdate.config.is_active) {
+      throw unprocessable(
+        'A domain configuration with config.is_active=false cannot be enabled',
+        [{
+          path: 'config.is_active',
+          message: 'Set config.is_active to true before enabling this domain configuration',
+        }],
+      );
+    }
+    if (currentBeforeUpdate.enabled === enabled) {
+      return { kind: 'unchanged', value: currentBeforeUpdate };
+    }
+
     const [result] = await this.pool.execute<ResultSetHeader>(
       `UPDATE white_label_domain_config
        SET is_enabled = ?, revision = revision + 1, updated_by = ?,
@@ -623,6 +672,8 @@ export class MysqlWhiteLabelRepository implements WhiteLabelRepository {
        INNER JOIN white_label_domain_config d ON d.id = a.domain_id
        WHERE a.organization_id = ? AND a.domain_id = ?
          AND a.is_enabled = 1 AND o.is_enabled = 1 AND d.is_enabled = 1
+         AND JSON_TYPE(JSON_EXTRACT(d.config_json, '$.is_active')) = 'BOOLEAN'
+         AND JSON_UNQUOTE(JSON_EXTRACT(d.config_json, '$.is_active')) = 'true'
        LIMIT 1`,
       [organizationId, domainId],
     );

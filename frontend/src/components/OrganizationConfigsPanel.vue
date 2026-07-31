@@ -236,7 +236,7 @@ async function save(
     if (editing.value) {
       await updateOrganizationConfig(editing.value.organizationId, {
         revision: editing.value.revision,
-        schemaVersion: editing.value.schemaVersion,
+        schemaVersion: 1,
         config,
       })
     } else {

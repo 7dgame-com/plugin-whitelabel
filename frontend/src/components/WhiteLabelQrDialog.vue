@@ -17,16 +17,16 @@
         }}
         ×
         {{
-          assignment.domainDisplayName ||
-          assignment.domain ||
+          assignment.domainDescription ||
+          assignment.domainConfigKey ||
           `#${assignment.domainId}`
         }}
       </strong>
       <span
-        v-if="assignment.organizationName || assignment.domain"
+        v-if="assignment.organizationName || assignment.domainConfigKey"
         class="qr-context"
       >
-        {{ assignment.organizationName }} · {{ assignment.domain }}
+        {{ assignment.organizationName }} · {{ assignment.domainConfigKey }}
       </span>
       <el-alert
         :title="t('qr.hint')"

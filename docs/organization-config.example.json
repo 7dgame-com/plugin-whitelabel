@@ -1,0 +1,13 @@
+{
+  "brand": {
+    "name": "示例购买方",
+    "logo": "https://assets.example.com/buyer/logo.webp"
+  },
+  "features": {
+    "courseCatalog": true,
+    "community": false
+  },
+  "support": {
+    "email": "support@example.com"
+  }
+}

@@ -42,14 +42,14 @@
       :empty-text="t('common.noData')"
     >
       <el-table-column
-        prop="displayName"
-        :label="t('domain.displayName')"
+        prop="description"
+        :label="t('domain.descriptionField')"
         min-width="180"
       />
-      <el-table-column :label="t('domain.hostname')" min-width="220">
+      <el-table-column :label="t('domain.configKey')" min-width="220">
         <template #default="{ row }">
           <div class="identity-cell">
-            <code>{{ row.domain }}</code>
+            <code>{{ row.configKey }}</code>
             <span>#{{ row.domainId }}</span>
           </div>
         </template>
@@ -134,7 +134,7 @@ import {
 import { useAuthSession } from '../composables/useAuthSession'
 import type {
   DomainConfigRecord,
-  JsonObject,
+  StaticDomainConfig,
 } from '../domain/types'
 
 const { t } = useI18n()
@@ -198,9 +198,8 @@ async function openEdit(row: DomainConfigRecord): Promise<void> {
 }
 
 async function save(value: {
-  domain: string
-  displayName: string
-  config: JsonObject
+  configKey: string
+  config: StaticDomainConfig
 }): Promise<void> {
   if (!isRootUser.value) return
   saving.value = true
@@ -209,7 +208,7 @@ async function save(value: {
       await updateDomainConfig(editing.value.domainId, {
         ...value,
         revision: editing.value.revision,
-        schemaVersion: editing.value.schemaVersion,
+        schemaVersion: 1,
       })
     } else {
       await createDomainConfig({

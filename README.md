@@ -4,10 +4,16 @@
 两个完全独立的配置资源：
 
 - **组织 JSON**：购买账号的购买方配置；
-- **域名 JSON**：代理产品的代理方配置；
+- **域名 JSON**：代理产品的代理方配置，是与主前端 `StaticDomainConfig` 同结构的
+  独立快照；
 - **组合授权**：只声明某个组织可以搭配某个域名，不保存或合并 JSON；
-- **HTTPS 二维码**：二维码本身是 `yii3-a1` 的只读 REST 地址，Unity 扫描后直接
-  `GET` 获取两份独立 JSON。
+- **HTTPS 二维码**：目标协议是把二维码做成 `yii3-a1` 的只读 REST 地址，Unity
+  扫描后直接 `GET` 获取两份独立 JSON。
+
+这里的“域名”不是某一个精确 hostname，而是主前端静态域名配置的
+`configKey` / 域名族。例如请求域名 `d.dev.xrugc.com` 会命中配置键
+`dev.xrugc.com`。插件另外生成稳定的数字 `domainId`，二维码中的 `d` 只放这个
+数字 ID。
 
 ## 最终架构
 
@@ -30,7 +36,30 @@ plugin-whitelabel backend
 ```
 
 主前端和主后端均不新增白牌业务代码或白牌数据表。主后端只继续作为身份与组织
-权威源；`yii3-a1` 只承担公开、只读的 Unity 网关。
+权威源；规划中的 `yii3-a1` 只承担公开、只读的 Unity 网关。
+
+> **当前状态：** `yii3-a1` 的白牌路由仍是接口草案，尚未部署。因此当前二维码
+> URL 代表最终协议，不能把它当作已经可用的线上接口；本项目不存在
+> `yii3-a3`。
+
+## 域名配置键与主前端的关系
+
+- 插件保存完整的域名 JSON 快照，`config.name` 就是 `configKey`，例如
+  `dev.xrugc.com`；`config.description` 用作显示名称；
+- 插件运行时不读取、不修改，也不依赖主前端的
+  `web/public/config/domains/*.json`；主前端停机不会影响 Unity 解析已保存的快照；
+- 快照必须已经包含 Unity 所需的有效内容。`fallback_domain` 只保留为与主前端格式
+  对齐的元数据，插件、A1 和 Unity 都不会沿它递归抓取另一份配置；完全依赖外部
+  fallback 且自身内容为空的文档不能保存；
+- 主前端现有匹配规则会去掉 `d.` / `www.` 并逐级尝试父域名，所以
+  `d.dev.xrugc.com` 可以命中 `dev.xrugc.com`；
+- 如果同一配置也要被主前端识别，必须另行新增并发布
+  `web/public/config/domains/{configKey}.json`。插件不会自动把数据同步进主前端。
+
+域名快照示例见 [`docs/domain-config.example.json`](docs/domain-config.example.json)，
+组织 JSON 示例见
+[`docs/organization-config.example.json`](docs/organization-config.example.json)。两者的
+字段空间互不影响，后端和 Unity 都不会把它们合并。
 
 完整设计见：
 
@@ -72,6 +101,9 @@ pnpm dev
 | 插件 MySQL | `localhost:3337` |
 | 主后端（外部依赖） | `http://localhost:8081` |
 | yii3-a1（外部依赖） | `http://localhost:8888` |
+
+`yii3-a1` 地址是待接入的外部依赖；在白牌路由完成并部署前，本地或开发环境中的
+二维码解析不会形成完整闭环。
 
 ## 主前端注册
 
@@ -117,6 +149,11 @@ pnpm dev
 ## 安全约束
 
 - 两份 `config_json` 都会下发到 Unity，应始终视为公开数据；
+- 组织和域名使用两个独立 JSON Schema。组织 v1 只要求顶层为 object；域名 v1
+  校验 `StaticDomainConfig` 字段以及 `config.name === configKey`；
+- 当前只实现 `schemaVersion: 1`，创建时可省略并默认填 1，更新必须显式提交 1；
+- 管理界面共用 JSON 编辑器，提供语法高亮、行号、格式化、压缩和实时 Schema
+  诊断；JSON 或 Schema 校验失败时不能保存；
 - JSON 中禁止 token、密码、签名密钥、数据库连接串等秘密；
 - JSON 字段名只允许 ASCII 字母、数字、点、下划线和连字符，避免 Unicode 同形键绕过；
 - 新配置和新组合默认停用，确认后显式启用；

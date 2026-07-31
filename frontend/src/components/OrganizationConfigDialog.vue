@@ -43,14 +43,10 @@
       </el-form-item>
 
       <el-form-item :label="t('organization.json')" prop="json">
-        <el-input
+        <JsonObjectEditor
           v-model="form.json"
-          type="textarea"
-          :rows="15"
-          resize="vertical"
-          spellcheck="false"
-          class="json-editor"
-          :placeholder="t('common.jsonPlaceholder')"
+          schema="organization"
+          :aria-label="t('organization.json')"
         />
       </el-form-item>
     </el-form>
@@ -70,11 +66,13 @@
 import { reactive, ref, watch } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { useI18n } from 'vue-i18n'
+import JsonObjectEditor from './JsonObjectEditor.vue'
 import type {
   JsonObject,
   OrganizationConfigRecord,
   OrganizationSummary,
 } from '../domain/types'
+import { validateJsonObjectText } from '../domain/jsonObject'
 
 const props = defineProps<{
   visible: boolean
@@ -122,16 +120,12 @@ function reset(): void {
 }
 
 function parseJson(): JsonObject | null {
-  try {
-    const parsed = JSON.parse(form.json) as unknown
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error('Expected object')
-    }
-    return parsed as JsonObject
-  } catch {
+  const parsed = validateJsonObjectText(form.json, 'organization')
+  if (!parsed.valid) {
     ElMessage.error(t('common.jsonInvalid'))
     return null
   }
+  return parsed.value
 }
 
 async function submit(): Promise<void> {

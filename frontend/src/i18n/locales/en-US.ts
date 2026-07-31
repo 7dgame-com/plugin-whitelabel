@@ -24,6 +24,15 @@ export default {
     jsonPlaceholder: 'Enter one complete, valid JSON object',
     jsonInvalid:
       'Configuration must be a valid JSON object, not an array or primitive',
+    jsonFormat: 'Format',
+    jsonCompact: 'Compact',
+    jsonValid: 'JSON and schema are valid',
+    jsonSyntaxInvalid: 'Invalid JSON syntax',
+    jsonObjectRequired: 'The top-level value must be a JSON object',
+    jsonSecurityInvalid: 'Security validation failed: {detail}',
+    jsonSchemaInvalid: 'Schema validation failed: {detail}',
+    jsonObjectSchema: 'Organization schema · top-level JSON object',
+    jsonDomainSchema: 'Domain schema · main-frontend StaticDomainConfig',
     saveSuccess: 'Configuration saved',
     saveFailed: 'Save failed; check the content or revision conflict',
     statusUpdated: 'Status updated',
@@ -58,33 +67,33 @@ export default {
     optionsFailed: 'Could not load the complete organization list',
   },
   domain: {
-    agentLabel: 'Agent domain',
+    agentLabel: 'Agent domain configuration',
     title: 'Domain JSON',
     description:
-      'Stores Unity settings owned by the agent/channel domain, never buyer-organization settings.',
+      'Stores agent settings aligned with the main frontend domains/*.json. name is a domain-family configuration key, not an exact request hostname.',
     agentBoundary:
-      'Edit only the agent domain JSON here. Buyer organization JSON is managed separately and is never merged into this record.',
+      'Edit one complete StaticDomainConfig JSON object. name is the main-frontend key (for example dev.xrugc.com), description is the list label, and buyer organization JSON stays separate.',
     rootScope:
       'Domain JSON is a global agent-side resource; only root can create, edit, or toggle it.',
     rootOnlyTitle: 'Domain JSON is root-only',
     rootOnlyDescription:
       'Admins do not read standalone agent-domain configuration. They only see assignments in their organization scope; QR is available only when all three layers are enabled.',
-    displayName: 'Agent display name',
-    displayNamePlaceholder: 'Example: East Region Agent',
-    hostname: 'Exact hostname',
-    hostnamePlaceholder: 'agent.example.com',
+    descriptionField: 'Configuration description',
+    configKey: 'Main-frontend domain configuration key',
     json: 'Agent domain JSON',
     add: 'Add domain JSON',
     createTitle: 'Add agent domain JSON',
     editTitle: 'Edit agent domain JSON',
-    searchPlaceholder: 'Search display name or exact hostname',
+    searchPlaceholder: 'Search description or domain configuration key',
     loadFailed: 'Failed to load domain configurations',
+    disableBeforeInactive:
+      'This domain configuration is enabled. Disable it in the list before setting JSON is_active to false.',
   },
   assignment: {
     deliveryLabel: 'Authorized assignment',
     title: 'Assignments & QR',
     description:
-      'Authorizes one buyer organization on one agent domain; the backend provides the QR URL.',
+      'Authorizes one buyer organization on one agent domain configuration key; the backend provides the QR URL.',
     referenceOnly:
       'An assignment stores only organizationId and domainId references. It never copies or merges either JSON. New assignments are disabled.',
     rootScope:

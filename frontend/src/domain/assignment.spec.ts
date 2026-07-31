@@ -50,8 +50,8 @@ describe('three-layer assignment availability', () => {
       qrUrl: null,
       organizationName: '',
       organizationTitle: '',
-      domain: '',
-      domainDisplayName: '',
+      domainConfigKey: '',
+      domainDescription: '',
     })
     const assignments = [
       record(1, 42, false),

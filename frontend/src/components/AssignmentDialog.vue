@@ -64,9 +64,14 @@
             v-for="item in domains"
             :key="item.domainId"
             :value="item.domainId"
-            :label="`${item.displayName} (${item.domain} · #${item.domainId})`"
+            :label="
+              `${item.description || item.configKey} (${item.configKey} · #${item.domainId})`
+            "
           >
-            <span>{{ item.displayName }} · {{ item.domain }}</span>
+            <span>
+              {{ item.description || item.configKey }} ·
+              {{ item.configKey }}
+            </span>
             <el-tag
               size="small"
               :type="item.enabled ? 'success' : 'info'"

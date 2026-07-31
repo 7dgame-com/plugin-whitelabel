@@ -50,11 +50,25 @@ export interface OrganizationConfig extends AuditFields {
   enabled: boolean;
 }
 
+/**
+ * A snapshot of the main frontend's public/config/domains/<configKey>.json
+ * contract. The known fields are required while future public fields remain
+ * representable through JsonObject's index signature.
+ */
+export interface StaticDomainConfig extends JsonObject {
+  name: string;
+  description: string;
+  is_active: boolean;
+  fallback_domain: string | null;
+  default_config: JsonObject;
+  configs: { [language: string]: JsonObject };
+}
+
 export interface DomainConfig extends AuditFields {
   domainId: number;
-  domain: string;
+  configKey: string;
   displayName: string;
-  config: JsonObject;
+  config: StaticDomainConfig;
   schemaVersion: number;
   revision: number;
   enabled: boolean;
@@ -72,7 +86,7 @@ export interface Assignment extends AuditFields {
     enabled: boolean;
   };
   domain: {
-    host: string;
+    configKey: string;
     displayName: string;
     enabled: boolean;
   };
@@ -90,10 +104,10 @@ export interface ResolvedWhiteLabel {
   };
   domain: {
     id: number;
-    host: string;
+    configKey: string;
     revision: number;
     schemaVersion: number;
-    config: JsonObject;
+    config: StaticDomainConfig;
   };
 }
 
@@ -102,7 +116,7 @@ export interface OrganizationConfigInput {
   organizationName: string;
   organizationTitle: string;
   config: JsonObject;
-  schemaVersion: number;
+  schemaVersion: 1;
 }
 
 export interface OrganizationConfigUpdate
@@ -111,10 +125,9 @@ export interface OrganizationConfigUpdate
 }
 
 export interface DomainConfigInput {
-  domain: string;
-  displayName: string;
-  config: JsonObject;
-  schemaVersion: number;
+  configKey: string;
+  config: StaticDomainConfig;
+  schemaVersion: 1;
 }
 
 export interface DomainConfigUpdate extends DomainConfigInput {

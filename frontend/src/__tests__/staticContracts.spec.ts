@@ -42,17 +42,43 @@ describe('deployment contracts', () => {
     expect(readme).toContain('不复制、不拼接')
   })
 
-  it('preserves the stored schema version when editing existing JSON', () => {
+  it('pins all writes to the only supported schema version', () => {
     const organizationPanel = read(
       '../components/OrganizationConfigsPanel.vue',
     )
     const domainPanel = read('../components/DomainConfigsPanel.vue')
 
-    expect(organizationPanel).toContain(
+    expect(organizationPanel).not.toContain(
       'schemaVersion: editing.value.schemaVersion',
     )
-    expect(domainPanel).toContain(
+    expect(domainPanel).not.toContain(
       'schemaVersion: editing.value.schemaVersion',
     )
+    expect(organizationPanel.match(/schemaVersion: 1/g)).toHaveLength(2)
+    expect(domainPanel.match(/schemaVersion: 1/g)).toHaveLength(2)
+  })
+
+  it('uses one schema-aware JSON editor for both independent configs', () => {
+    const organizationDialog = read(
+      '../components/OrganizationConfigDialog.vue',
+    )
+    const domainDialog = read('../components/DomainConfigDialog.vue')
+    const editor = read('../components/JsonObjectEditor.vue')
+
+    expect(organizationDialog).toContain('<JsonObjectEditor')
+    expect(organizationDialog).toContain('schema="organization"')
+    expect(domainDialog).toContain('<JsonObjectEditor')
+    expect(domainDialog).toContain('schema="domain"')
+    expect(domainDialog).toContain('configKey: config.name')
+    expect(domainDialog).toContain(
+      'props.record?.enabled && !config.is_active',
+    )
+    expect(domainDialog).not.toContain('hostnameValidationMessage')
+    expect(editor).toContain('basicSetup')
+    expect(editor).toContain('jsonParseLinter')
+    expect(editor).toContain('formatJsonObjectText')
+    expect(editor).toContain('syntaxHighlightTheme')
+    expect(editor).toContain('--json-syntax-string')
+    expect(editor).toContain("'aria-describedby': statusId")
   })
 })

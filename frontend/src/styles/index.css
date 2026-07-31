@@ -275,12 +275,6 @@ body {
   margin-bottom: var(--spacing-md);
 }
 
-.json-editor textarea {
-  font-family:
-    'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-  line-height: 1.55;
-}
-
 .qr-content {
   display: flex;
   flex-direction: column;

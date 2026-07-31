@@ -9,6 +9,7 @@ import type {
   OrganizationConfig,
   ResolvedWhiteLabel,
   SessionVerifier,
+  StaticDomainConfig,
   WhiteLabelRepository,
 } from '../src/types';
 import { organizationDirectoryFailure } from '../src/errors';
@@ -44,14 +45,35 @@ function organization(
   };
 }
 
+function domainSnapshot(
+  overrides: Partial<StaticDomainConfig> = {},
+): StaticDomainConfig {
+  return {
+    name: 'dev.xrugc.com',
+    description: 'XR UGC Dev',
+    is_active: true,
+    fallback_domain: 'xrugc.com',
+    default_config: {
+      homepage: 'https://dev.xrugc.com/',
+    },
+    configs: {
+      'zh-CN': {
+        title: 'XR UGC Dev',
+        supportUrl: 'https://support.acme.example',
+      },
+    },
+    ...overrides,
+  };
+}
+
 function domain(overrides: Partial<DomainConfig> = {}): DomainConfig {
   return {
     domainId: DOMAIN_ID,
-    domain: 'ar.acme.example',
-    displayName: 'Acme AR',
-    schemaVersion: 2,
+    configKey: 'dev.xrugc.com',
+    displayName: 'XR UGC Dev',
+    schemaVersion: 1,
     revision: 3,
-    config: { endpoints: { supportUrl: 'https://support.acme.example' } },
+    config: domainSnapshot(),
     enabled: true,
     ...audit,
     ...overrides,
@@ -71,8 +93,8 @@ function assignment(overrides: Partial<Assignment> = {}): Assignment {
       enabled: true,
     },
     domain: {
-      host: 'ar.acme.example',
-      displayName: 'Acme AR',
+      configKey: 'dev.xrugc.com',
+      displayName: 'XR UGC Dev',
       enabled: true,
     },
     ...audit,
@@ -93,10 +115,10 @@ function resolved(): ResolvedWhiteLabel {
     },
     domain: {
       id: DOMAIN_ID,
-      host: 'ar.acme.example',
+      configKey: 'dev.xrugc.com',
       revision: 3,
-      schemaVersion: 2,
-      config: { endpoints: { supportUrl: 'https://support.acme.example' } },
+      schemaVersion: 1,
+      config: domainSnapshot(),
     },
   };
 }
@@ -271,7 +293,7 @@ describe('three-layer white-label backend', () => {
       .set('Authorization', 'Bearer session-token')
       .send({
         revision: 4,
-        schemaVersion: 2,
+        schemaVersion: 1,
         config: { features: { classroom: true } },
     });
     expect(response.status).toBe(200);
@@ -286,7 +308,7 @@ describe('three-layer white-label backend', () => {
         organizationName: 'authoritative-acme',
         organizationTitle: 'Authoritative Acme Academy',
         revision: 4,
-        schemaVersion: 2,
+        schemaVersion: 1,
         config: { features: { classroom: true } },
       },
       '1',
@@ -348,9 +370,10 @@ describe('three-layer white-label backend', () => {
       .post('/api/v1/domain-configs')
       .set('Authorization', 'Bearer session-token')
       .send({
-        domain: 'AR.ACME.EXAMPLE',
-        displayName: 'Acme AR',
-        config: { nested: { secrets: { key: 'must-not-be-stored' } } },
+        configKey: 'dev.xrugc.com',
+        config: domainSnapshot({
+          default_config: { secrets: { accessToken: 'must-not-be-stored' } },
+        }),
       });
     expect(invalid.status).toBe(422);
     expect(repo.createDomainConfig).not.toHaveBeenCalled();
@@ -364,9 +387,10 @@ describe('three-layer white-label backend', () => {
       .post('/api/v1/domain-configs')
       .set('Authorization', 'Bearer session-token')
       .send({
-        domain: 'AR.ACME.EXAMPLE',
-        displayName: 'Acme AR',
-        config: { publicEndpoint: 'https://api.acme.example' },
+        configKey: 'dev.xrugc.com',
+        config: domainSnapshot({
+          future_public_field: { enabled: true },
+        }),
       });
     expect(domainResponse.status).toBe(201);
     expect(domainResponse.body.data).toMatchObject({
@@ -374,10 +398,11 @@ describe('three-layer white-label backend', () => {
       enabled: false,
     });
     expect(repo.createDomainConfig).toHaveBeenCalledWith({
-      domain: 'ar.acme.example',
-      displayName: 'Acme AR',
+      configKey: 'dev.xrugc.com',
       schemaVersion: 1,
-      config: { publicEndpoint: 'https://api.acme.example' },
+      config: domainSnapshot({
+        future_public_field: { enabled: true },
+      }),
     }, '1');
 
     const assignmentResponse = await request(service)
@@ -396,6 +421,65 @@ describe('three-layer white-label backend', () => {
       DOMAIN_ID,
       '1',
     );
+  });
+
+  it('rejects legacy exact-host fields and mismatched snapshot names', async () => {
+    const repo = repository();
+    const service = app(repo);
+
+    const legacy = await request(service)
+      .post('/api/v1/domain-configs')
+      .set('Authorization', 'Bearer session-token')
+      .send({
+        domain: 'd.dev.xrugc.com',
+        displayName: 'Legacy exact host',
+        config: domainSnapshot(),
+      });
+    expect(legacy.status).toBe(422);
+
+    const mismatch = await request(service)
+      .post('/api/v1/domain-configs')
+      .set('Authorization', 'Bearer session-token')
+      .send({
+        configKey: 'xrugc.com',
+        config: domainSnapshot(),
+      });
+    expect(mismatch.status).toBe(422);
+    expect(mismatch.body.error.details).toContainEqual(expect.objectContaining({
+      path: 'config.name',
+    }));
+    expect(repo.createDomainConfig).not.toHaveBeenCalled();
+  });
+
+  it('does not enable or keep enabled a snapshot with is_active=false', async () => {
+    const inactiveConfig = domainSnapshot({ is_active: false });
+    const repo = repository({
+      findDomainConfig: vi.fn().mockResolvedValue(domain({
+        config: inactiveConfig,
+        enabled: false,
+      })),
+    });
+    const service = app(repo);
+
+    const enable = await request(service)
+      .post(`/api/v1/domain-configs/${DOMAIN_ID}/enable`)
+      .set('Authorization', 'Bearer session-token')
+      .send({ revision: 3 });
+    expect(enable.status).toBe(422);
+    expect(repo.setDomainConfigEnabled).not.toHaveBeenCalled();
+
+    vi.mocked(repo.findDomainConfig).mockResolvedValue(domain({ enabled: true }));
+    const update = await request(service)
+      .put(`/api/v1/domain-configs/${DOMAIN_ID}`)
+      .set('Authorization', 'Bearer session-token')
+      .send({
+        revision: 3,
+        configKey: 'dev.xrugc.com',
+        schemaVersion: 1,
+        config: inactiveConfig,
+      });
+    expect(update.status).toBe(422);
+    expect(repo.updateDomainConfig).not.toHaveBeenCalled();
   });
 
   it('lets admin read only scoped assignments and never derives QR URL from the request', async () => {
@@ -423,8 +507,8 @@ describe('three-layer white-label backend', () => {
         enabled: true,
       },
       domain: {
-        host: 'ar.acme.example',
-        displayName: 'Acme AR',
+        configKey: 'dev.xrugc.com',
+        displayName: 'XR UGC Dev',
         enabled: true,
       },
     });
@@ -485,6 +569,19 @@ describe('three-layer white-label backend', () => {
     expect(missing.status).toBe(404);
     expect(invalid.status).toBe(404);
     expect(invalid.body).toEqual(missing.body);
+  });
+
+  it('never resolves a domain snapshot with is_active=false', async () => {
+    const inactive = resolved();
+    inactive.domain.config = domainSnapshot({ is_active: false });
+    const service = app(repository({
+      resolveEnabledAssignment: vi.fn().mockResolvedValue(inactive),
+    }));
+
+    await request(service)
+      .get(`/internal/v1/white-label-configs/resolve?o=${ORGANIZATION_ID}&d=${DOMAIN_ID}`)
+      .set('X-Internal-Token', INTERNAL_TOKEN)
+      .expect(404);
   });
 
   it('returns the two independent configs directly and supports ETag revalidation', async () => {

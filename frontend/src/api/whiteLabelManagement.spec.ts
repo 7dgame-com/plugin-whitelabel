@@ -16,6 +16,7 @@ import {
   listAssignments,
   listOrganizationConfigs,
   normalizeAssignment,
+  normalizeDomainConfig,
   setAssignmentEnabled,
   updateOrganizationConfig,
 } from './whiteLabelManagement'
@@ -70,16 +71,24 @@ describe('three-resource management API contract', () => {
   it('creates organization and domain JSON as independent disabled records', async () => {
     vi.mocked(backendApi.post).mockResolvedValue({ data: { data: {} } })
 
+    const domainConfig = {
+      name: 'dev.xrugc.com',
+      description: 'XR UGC Dev',
+      is_active: true,
+      fallback_domain: null,
+      default_config: { agentBrand: 'north' },
+      configs: {},
+    }
+
     await createOrganizationConfig({
       organizationId: 42,
       schemaVersion: 1,
       config: { buyerTheme: 'blue' },
     })
     await createDomainConfig({
-      domain: 'agent.example.com',
-      displayName: '北区代理',
+      configKey: 'dev.xrugc.com',
       schemaVersion: 1,
-      config: { agentBrand: 'north' },
+      config: domainConfig,
     })
 
     expect(backendApi.post).toHaveBeenNthCalledWith(
@@ -92,10 +101,9 @@ describe('three-resource management API contract', () => {
       },
     )
     expect(backendApi.post).toHaveBeenNthCalledWith(2, '/domain-configs', {
-      domain: 'agent.example.com',
-      displayName: '北区代理',
+      configKey: 'dev.xrugc.com',
       schemaVersion: 1,
-      config: { agentBrand: 'north' },
+      config: domainConfig,
     })
     expect(vi.mocked(backendApi.post).mock.calls[0]?.[1]).not.toHaveProperty(
       'enabled',
@@ -103,6 +111,30 @@ describe('three-resource management API contract', () => {
     expect(vi.mocked(backendApi.post).mock.calls[1]?.[1]).not.toHaveProperty(
       'enabled',
     )
+  })
+
+  it('normalizes the domain key and derives its label from config.description', () => {
+    expect(
+      normalizeDomainConfig({
+        domainId: 8,
+        configKey: 'dev.xrugc.com',
+        schemaVersion: 1,
+        revision: 2,
+        enabled: true,
+        config: {
+          name: 'dev.xrugc.com',
+          description: 'XR UGC Dev',
+          is_active: true,
+          fallback_domain: null,
+          default_config: {},
+          configs: {},
+        },
+      }),
+    ).toMatchObject({
+      domainId: 8,
+      configKey: 'dev.xrugc.com',
+      description: 'XR UGC Dev',
+    })
   })
 
   it('updates organization JSON with only revision, schema and config', async () => {
@@ -187,8 +219,8 @@ describe('three-resource management API contract', () => {
         },
         domain: {
           domainId: 8,
-          domain: 'agent.example.com',
-          displayName: '北区代理',
+          configKey: 'dev.xrugc.com',
+          description: 'XR UGC Dev',
           enabled: true,
         },
         enabled: true,
@@ -201,7 +233,8 @@ describe('three-resource management API contract', () => {
       organizationId: 42,
       domainId: 8,
       organizationName: 'buyer',
-      domain: 'agent.example.com',
+      domainConfigKey: 'dev.xrugc.com',
+      domainDescription: 'XR UGC Dev',
       enabled: true,
       organizationEnabled: true,
       domainEnabled: true,

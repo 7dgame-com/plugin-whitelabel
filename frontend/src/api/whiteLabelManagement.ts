@@ -9,6 +9,7 @@ import type {
   ListQuery,
   OrganizationConfigRecord,
   PagedResult,
+  StaticDomainConfig,
   UpdateDomainConfigInput,
   UpdateOrganizationConfigInput,
 } from '../domain/types'
@@ -79,13 +80,26 @@ export function normalizeOrganizationConfig(
 
 export function normalizeDomainConfig(value: unknown): DomainConfigRecord {
   const raw = asRecord(value)
+  const config = jsonObject(raw.config)
+  const configKey = stringValue(
+    raw.configKey,
+    raw.domainConfigKey,
+    raw.domain,
+    config.name,
+  )
   return {
     domainId: numberValue(raw.domainId),
-    domain: stringValue(raw.domain),
-    displayName: stringValue(raw.displayName, raw.domain),
+    configKey,
+    description: stringValue(
+      raw.description,
+      raw.domainDescription,
+      raw.displayName,
+      config.description,
+      configKey,
+    ),
     schemaVersion: numberValue(raw.schemaVersion),
     revision: numberValue(raw.revision),
-    config: jsonObject(raw.config),
+    config: config as StaticDomainConfig,
     enabled: booleanValue(raw.enabled),
     ...timestamps(raw),
   }
@@ -121,15 +135,22 @@ export function normalizeAssignment(value: unknown): AssignmentRecord {
       organization.title,
       raw.organizationName,
     ),
-    domain: stringValue(
+    domainConfigKey: stringValue(
+      raw.domainConfigKey,
       typeof raw.domain === 'string' ? raw.domain : undefined,
+      domain.configKey,
+      domain.domainConfigKey,
       domain.domain,
       domain.host,
     ),
-    domainDisplayName: stringValue(
+    domainDescription: stringValue(
+      raw.domainDescription,
       raw.domainDisplayName,
+      domain.description,
+      domain.domainDescription,
       domain.displayName,
       typeof raw.domain === 'string' ? raw.domain : undefined,
+      domain.configKey,
       domain.domain,
     ),
     ...timestamps(raw),

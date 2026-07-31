@@ -70,13 +70,15 @@
       <el-table-column :label="t('domain.agentLabel')" min-width="220">
         <template #default="{ row }">
           <div class="identity-cell">
-            <strong v-if="row.domainDisplayName || row.domain">
-              {{ row.domainDisplayName || row.domain }}
+            <strong v-if="row.domainDescription || row.domainConfigKey">
+              {{ row.domainDescription || row.domainConfigKey }}
             </strong>
             <strong v-else>
               {{ t('domain.agentLabel') }} #{{ row.domainId }}
             </strong>
-            <span v-if="row.domain">{{ row.domain }} · #{{ row.domainId }}</span>
+            <span v-if="row.domainConfigKey">
+              {{ row.domainConfigKey }} · #{{ row.domainId }}
+            </span>
             <span v-else>#{{ row.domainId }}</span>
           </div>
         </template>
@@ -186,7 +188,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, shallowRef } from 'vue'
 import { Plus, Search } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
@@ -226,7 +228,7 @@ const pageSize = ref(20)
 const total = ref(0)
 const items = ref<AssignmentRecord[]>([])
 const organizationOptions = ref<OrganizationConfigRecord[]>([])
-const domainOptions = ref<DomainConfigRecord[]>([])
+const domainOptions = shallowRef<DomainConfigRecord[]>([])
 const editorVisible = ref(false)
 const qrVisible = ref(false)
 const qrAssignment = ref<AssignmentRecord | null>(null)
@@ -258,9 +260,9 @@ function enrichAssignment(row: AssignmentRecord): AssignmentRecord {
       row.organizationName || organization?.organizationName || '',
     organizationTitle:
       row.organizationTitle || organization?.organizationTitle || '',
-    domain: row.domain || domain?.domain || '',
-    domainDisplayName:
-      row.domainDisplayName || domain?.displayName || '',
+    domainConfigKey: row.domainConfigKey || domain?.configKey || '',
+    domainDescription:
+      row.domainDescription || domain?.description || '',
   }
 }
 

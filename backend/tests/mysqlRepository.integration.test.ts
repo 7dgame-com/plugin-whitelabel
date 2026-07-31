@@ -72,12 +72,29 @@ describeIntegration('MySQL white-label repository', () => {
     expect(scoped.items.map((item) => item.organizationId)).toEqual([12_001]);
     expect(scoped.total).toBe(1);
 
+    const domainSnapshot = {
+      name: 'dev.xrugc.com',
+      description: 'Integration Agent',
+      is_active: true,
+      fallback_domain: 'xrugc.com',
+      default_config: {
+        homepage: 'https://dev.xrugc.com/',
+      },
+      configs: {
+        'zh-CN': {
+          supportUrl: 'https://support.example',
+        },
+      },
+    };
     const domain = await repository.createDomainConfig({
-      domain: 'agent.integration.example',
-      displayName: 'Integration Agent',
+      configKey: 'dev.xrugc.com',
       schemaVersion: 1,
-      config: { agentOnly: { supportUrl: 'https://support.example' } },
+      config: domainSnapshot,
     }, '9001');
+    expect(domain).toMatchObject({
+      configKey: 'dev.xrugc.com',
+      displayName: 'Integration Agent',
+    });
     const domains = await repository.listDomainConfigs({
       q: 'integration',
       limit: 100,
@@ -94,7 +111,7 @@ describeIntegration('MySQL white-label repository', () => {
     await repository.createAssignment(12_002, domain.domainId, '9001');
     const scopedAssignments = await repository.listAssignments(
       [firstOrganization.organizationId],
-      { q: 'agent.integration', limit: 100, offset: 0 },
+      { q: 'dev.xrugc', limit: 100, offset: 0 },
     );
     expect(scopedAssignments.items.map((item) => item.assignmentId)).toEqual([
       assignment.assignmentId,
@@ -156,10 +173,8 @@ describeIntegration('MySQL white-label repository', () => {
       },
       domain: {
         id: domain.domainId,
-        host: 'agent.integration.example',
-        config: {
-          agentOnly: { supportUrl: 'https://support.example' },
-        },
+        configKey: 'dev.xrugc.com',
+        config: domainSnapshot,
       },
     });
 
@@ -183,6 +198,17 @@ describeIntegration('MySQL white-label repository', () => {
     if (domainEnabled.kind !== 'updated') {
       throw new Error('Expected the domain enable mutation to succeed');
     }
+    await expect(repository.updateDomainConfig(
+      domain.domainId,
+      {
+        configKey: domain.configKey,
+        schemaVersion: 1,
+        revision: domainEnabled.value.revision,
+        config: { ...domainSnapshot, is_active: false },
+      },
+      '9001',
+    )).rejects.toMatchObject({ status: 422 });
+
     const domainDisabled = await repository.setDomainConfigEnabled(
       domain.domainId,
       domainEnabled.value.revision,
@@ -190,6 +216,30 @@ describeIntegration('MySQL white-label repository', () => {
       '9001',
     );
     expect(domainDisabled.kind).toBe('updated');
+    if (domainDisabled.kind !== 'updated') {
+      throw new Error('Expected the domain disable mutation to succeed');
+    }
+
+    const inactiveUpdate = await repository.updateDomainConfig(
+      domain.domainId,
+      {
+        configKey: domain.configKey,
+        schemaVersion: 1,
+        revision: domainDisabled.value.revision,
+        config: { ...domainSnapshot, is_active: false },
+      },
+      '9001',
+    );
+    expect(inactiveUpdate.kind).toBe('updated');
+    if (inactiveUpdate.kind !== 'updated') {
+      throw new Error('Expected the disabled domain update to succeed');
+    }
+    await expect(repository.setDomainConfigEnabled(
+      domain.domainId,
+      inactiveUpdate.value.revision,
+      true,
+      '9001',
+    )).rejects.toMatchObject({ status: 422 });
     expect(await repository.resolveEnabledAssignment(
       firstOrganization.organizationId,
       domain.domainId,

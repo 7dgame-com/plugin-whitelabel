@@ -4,6 +4,17 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue }
 export type JsonObject = { [key: string]: JsonValue }
+export type WhiteLabelSchemaVersion = 1
+
+/** Same top-level contract as web/public/config/domains/*.json. */
+export interface StaticDomainConfig extends JsonObject {
+  name: string
+  description: string
+  is_active: boolean
+  fallback_domain: string | null
+  default_config: JsonObject
+  configs: { [locale: string]: JsonObject }
+}
 
 export interface OrganizationSummary {
   id: number
@@ -25,11 +36,11 @@ export interface OrganizationConfigRecord {
 
 export interface DomainConfigRecord {
   domainId: number
-  domain: string
-  displayName: string
+  configKey: string
+  description: string
   schemaVersion: number
   revision: number
-  config: JsonObject
+  config: StaticDomainConfig
   enabled: boolean
   createdAt?: string
   updatedAt?: string
@@ -46,36 +57,34 @@ export interface AssignmentRecord {
   qrUrl: string | null
   organizationName: string
   organizationTitle: string
-  domain: string
-  domainDisplayName: string
+  domainConfigKey: string
+  domainDescription: string
   createdAt?: string
   updatedAt?: string
 }
 
 export interface CreateOrganizationConfigInput {
   organizationId: number
-  schemaVersion: 1
+  schemaVersion: WhiteLabelSchemaVersion
   config: JsonObject
 }
 
 export interface UpdateOrganizationConfigInput {
   revision: number
-  schemaVersion: number
+  schemaVersion: WhiteLabelSchemaVersion
   config: JsonObject
 }
 
 export interface CreateDomainConfigInput {
-  domain: string
-  displayName: string
-  schemaVersion: 1
-  config: JsonObject
+  configKey: string
+  schemaVersion: WhiteLabelSchemaVersion
+  config: StaticDomainConfig
 }
 
 export interface UpdateDomainConfigInput {
-  domain: string
-  displayName: string
-  schemaVersion: number
-  config: JsonObject
+  configKey: string
+  schemaVersion: WhiteLabelSchemaVersion
+  config: StaticDomainConfig
   revision: number
 }
 

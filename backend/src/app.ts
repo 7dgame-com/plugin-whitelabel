@@ -14,6 +14,7 @@ import {
   organizationNotFound,
   revisionConflict,
   unauthorized,
+  unprocessable,
 } from './errors';
 import type {
   Assignment,
@@ -376,8 +377,7 @@ function createDomainRouter(repository: WhiteLabelRepository): express.Router {
     const body = parseInput(createDomainConfigSchema, request.body);
     const context = managementContext(response);
     const input: DomainConfigInput = {
-      domain: body.domain,
-      displayName: body.displayName,
+      configKey: body.configKey,
       schemaVersion: body.schemaVersion,
       config: body.config,
     };
@@ -401,6 +401,18 @@ function createDomainRouter(repository: WhiteLabelRepository): express.Router {
     const domainId = parseInput(positiveIdSchema, request.params.domainId);
     const body = parseInput(updateDomainConfigSchema, request.body);
     const context = managementContext(response);
+    if (!body.config.is_active) {
+      const current = await repository.findDomainConfig(domainId);
+      if (current?.revision === body.revision && current.enabled) {
+        throw unprocessable(
+          'Disable the domain configuration before saving a snapshot with config.is_active=false',
+          [{
+            path: 'config.is_active',
+            message: 'config.is_active must remain true while the plugin domain configuration is enabled',
+          }],
+        );
+      }
+    }
     const result = await repository.updateDomainConfig(
       domainId,
       body,
@@ -414,6 +426,18 @@ function createDomainRouter(repository: WhiteLabelRepository): express.Router {
       const domainId = parseInput(positiveIdSchema, request.params.domainId);
       const body = parseInput(revisionBodySchema, request.body);
       const context = managementContext(response);
+      if (enabled) {
+        const current = await repository.findDomainConfig(domainId);
+        if (current?.revision === body.revision && !current.config.is_active) {
+          throw unprocessable(
+            'A domain configuration with config.is_active=false cannot be enabled',
+            [{
+              path: 'config.is_active',
+              message: 'Set config.is_active to true before enabling this domain configuration',
+            }],
+          );
+        }
+      }
       const result = await repository.setDomainConfigEnabled(
         domainId,
         body.revision,
@@ -491,7 +515,7 @@ function createInternalRouter(repository: WhiteLabelRepository): express.Router 
       throw notFound();
     }
     const resolved = await repository.resolveEnabledAssignment(query.data.o, query.data.d);
-    if (!resolved) {
+    if (!resolved || !resolved.domain.config.is_active) {
       throw notFound();
     }
     sendInternalConfig(request, response, resolved);

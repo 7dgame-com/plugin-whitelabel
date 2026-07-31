@@ -52,9 +52,15 @@ admin 只能为当前会话包含的组织 ID 创建、查看、修改或启停�
 更改。组织名称和标题不接受客户端写入：admin 使用 `verify-token` 权威快照，root
 通过现有主后端组织目录确认 ID 并取得权威快照。
 
+组织 `config` 与下节的域名 `config` 是两个完全独立的字段空间。组织 Schema v1
+只要求顶层为 JSON object，并执行通用安全限制；它不要求也不复用
+`StaticDomainConfig` 的结构。admin 同时属于多个组织时，可以分别管理这些组织的
+JSON，但不能借由任一组织权限读取其他组织或域名 JSON。
+
 ## 3. 域名 JSON
 
-域名写操作仅 root 可用：
+域名写操作仅 root 可用。这里的域名是主前端静态配置键/域名族，不是精确
+hostname：
 
 ```http
 GET  /api/v1/domain-configs?page=1&pageSize=20&q=agent
@@ -69,15 +75,52 @@ POST /api/v1/domain-configs/{domainId}/disable
 
 ```json
 {
-  "domain": "agent.example.com",
-  "displayName": "代理方 A",
+  "configKey": "dev.xrugc.com",
   "schemaVersion": 1,
-  "config": {}
+  "config": {
+    "name": "dev.xrugc.com",
+    "description": "XR UGC Dev",
+    "is_active": true,
+    "fallback_domain": "default",
+    "default_config": {
+      "homepage": "https://dev.xrugc.com/"
+    },
+    "configs": {
+      "zh-CN": {
+        "title": "XR UGC Dev"
+      }
+    }
+  }
 }
 ```
 
-服务端生成数字 `domainId`。hostname 规范化为小写精确域名，禁止 scheme、路径、
-端口、通配符和 IP，且全局唯一。
+服务端生成数字 `domainId`。客户端提交全局唯一的 `configKey`，且它必须与
+`config.name` 完全相等；服务端从 `config.description` 派生只读 `displayName`。
+客户端不提交 `displayName` 或当前访问 host。
+
+更新请求增加 `revision`，其余字段保持相同。`config.name` 必须符合主前端静态配置
+键的规范并与返回的 `configKey` 一致；例如请求 host `d.dev.xrugc.com` 对应的配置键
+可以是 `dev.xrugc.com`。修改配置键不会改变插件数字 `domainId`。
+
+域名 `config` 是与主前端 `StaticDomainConfig` 同结构的独立快照，包含：
+
+| 字段 | 约束 |
+|---|---|
+| `name` | 必填；配置键，也是主前端静态文件名去掉 `.json` 后的部分 |
+| `description` | 必填 string；代理方显示名称来源 |
+| `is_active` | 必填 boolean |
+| `fallback_domain` | 必填 string 或 null，非 null 值同样是配置键 |
+| `default_config` | 必填 object |
+| `configs` | 必填 object；每个语言键的值必须为 object |
+
+插件不会在运行时访问或改写主前端文件。如果同一个新键也要在主前端生效，需要在
+主前端仓库单独增加 `web/public/config/domains/{configKey}.json` 并发布。
+`fallback_domain` 只作为格式兼容元数据返回，插件、A1 和 Unity 不沿它递归读取其他
+文件。提交给插件的快照必须已经包含 Unity 所需的有效内容；外部 fallback 且
+`default_config`、`configs` 都为空的纯引用文档会被拒绝。
+
+当前组织和域名接口只接受 `schemaVersion: 1`。创建时可以省略该字段并默认使用 1；
+更新必须显式提交 1，不能用未实现的版本号绕过当前 Schema。
 
 ## 4. 组合授权与二维码
 
@@ -118,8 +161,8 @@ POST /api/v1/assignments/{assignmentId}/disable
     "enabled": true
   },
   "domain": {
-    "host": "agent.example.com",
-    "displayName": "代理方 A",
+    "configKey": "dev.xrugc.com",
+    "displayName": "XR UGC Dev",
     "enabled": true
   },
   "createdBy": "1001",
@@ -161,10 +204,17 @@ If-None-Match: "wl-o42-r3-d8-r5-a2"
   },
   "domain": {
     "id": 8,
-    "host": "agent.example.com",
+    "configKey": "dev.xrugc.com",
     "schemaVersion": 1,
     "revision": 5,
-    "config": {}
+    "config": {
+      "name": "dev.xrugc.com",
+      "description": "XR UGC Dev",
+      "is_active": true,
+      "fallback_domain": "default",
+      "default_config": {},
+      "configs": {}
+    }
   }
 }
 ```
@@ -179,6 +229,9 @@ Cache-Control: private, max-age=60
 任一配置或组合不存在、停用以及 ID 非法均返回相同 404。
 
 ## 6. Unity / yii3-a1 公开 API
+
+> 当前状态：以下 `yii3-a1` 白牌路由是待接入契约，尚未部署。二维码格式已经确定，
+> 但在 A1 实现并发布前不能形成可访问的完整链路。本设计不使用 `yii3-a3`。
 
 ```http
 GET /v1/white-label-configs?o=42&d=8

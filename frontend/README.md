@@ -8,12 +8,19 @@
 前端严格区分三类资源：
 
 1. **购买方组织 JSON**：一条主平台组织对应一个独立 JSON object。
-2. **代理方域名 JSON**：一个精确域名对应一个独立 JSON object。
+2. **代理方域名 JSON**：一个主前端静态 `configKey` / 域名族对应一个独立的
+   `StaticDomainConfig` JSON 快照，不代表某一个精确 hostname。
 3. **授权组合**：只引用 `organizationId + domainId`，不复制、不拼接、更不在
    前端合并前两份 JSON。
 
 这两个 JSON 分别创建、编辑、版本化和启停。组合创建后也默认停用，必须由
 root 明确启用。
+
+例如主前端请求 host `d.dev.xrugc.com` 会按静态候选键规则命中
+`dev.xrugc.com`；域名 JSON 的 `config.name` 保存这个 `configKey`。插件自己的
+数字 `domainId` 才是组合外键和二维码参数 `d`。插件只保存独立快照，运行时不会
+读取或修改主前端 `web/public/config/domains/*.json`；若同一配置也要在主前端生效，
+必须在主前端仓库单独新增 `{configKey}.json` 并发布。
 
 ## 权限矩阵
 
@@ -65,6 +72,16 @@ pnpm --filter plugin-whitelabel-frontend dev
 停用；更新与启停携带当前 `revision` 做乐观锁。新建使用 `schemaVersion: 1`，
 编辑时保留服务端现有 schemaVersion，不会意外降级。
 
+组织和域名弹窗使用同一个 JSON 编辑器，提供语法高亮、行号、搜索/撤销、格式化、
+压缩和实时诊断。两类配置使用不同 Schema：组织 v1 只要求顶层是 object；域名 v1
+校验 `StaticDomainConfig`，其中 `config.name` 是配置键，`config.description` 是显示
+名称。语法或 Schema 校验失败时不能提交。两份 Schema 随插件版本管理，互不继承，
+也不会让一侧 JSON 覆盖另一侧。
+
+当前只接受 `schemaVersion: 1`。域名 JSON 必须是可直接下发给 Unity 的自包含快照；
+`fallback_domain` 仅保留作格式兼容元数据，客户端不会再按它请求另一份配置。导入
+依赖外部 fallback 的主前端文件时，需要先把 Unity 所需内容物化到当前 JSON。
+
 关键写入 DTO：
 
 ```json
@@ -77,10 +94,16 @@ pnpm --filter plugin-whitelabel-frontend dev
 
 ```json
 {
-  "domain": "agent.example.com",
-  "displayName": "华东代理",
+  "configKey": "dev.xrugc.com",
   "schemaVersion": 1,
-  "config": {}
+  "config": {
+    "name": "dev.xrugc.com",
+    "description": "XR UGC Dev",
+    "is_active": true,
+    "fallback_domain": "default",
+    "default_config": {},
+    "configs": {}
+  }
 }
 ```
 
@@ -103,6 +126,9 @@ https://a1.example.com/v1/white-label-configs?o=42&d=8
 二维码只对已启用且当前用户有权查看的组合显示。
 本地开发唯一例外是 `http://localhost`、`http://127.0.0.1` 或 IPv6 loopback；
 非 loopback HTTP 地址仍会被拒绝。
+
+当前 `yii3-a1` 的白牌路由仍是草案且尚未部署；上述 URL 是已经确定的协议格式，
+不是对线上可用性的声明。本设计不存在 `yii3-a3`。
 
 ## Docker
 

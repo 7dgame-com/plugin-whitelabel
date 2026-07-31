@@ -42,6 +42,18 @@ A1 和插件后端通过受控内网服务发现互通，不向公网发布 `809
 
 无需修改 `web/src/plugin-system` 或主前端业务路由。
 
+### 域名静态配置边界
+
+插件域名 JSON 对齐主前端 `StaticDomainConfig` 结构，配置键也沿用
+`web/public/config/domains/{configKey}.json` 的命名语义，但两份数据是独立的：
+
+- 插件保存自己的完整 JSON 快照，供 Unity 解析；
+- 插件运行时不读取、不写入主前端静态文件，也不要求主前端可用；
+- 主前端的匹配器会去掉 `d.` / `www.` 并逐级尝试父域名，因此
+  `d.dev.xrugc.com` 可命中键 `dev.xrugc.com`；
+- 若新配置也要被主前端识别，必须在主前端仓库单独新增对应 JSON 并完成一次主前端
+  发布。只在插件中创建记录不会改变主前端行为。
+
 ## 3. 主后端
 
 不做代码和数据库改造。插件复用现有：
@@ -52,7 +64,10 @@ A1 和插件后端通过受控内网服务发现互通，不向公网发布 `809
 主后端故障时管理请求失败关闭，但 Unity → A1 → 插件内部 API 的读取链路不经过主
 后端。
 
-## 4. yii3-a1
+## 4. yii3-a1（待接入）
+
+以下是部署目标，不是当前已上线状态。`yii3-a1` 的白牌路由目前仍是草案且尚未
+部署；A1 未发布前，插件展示的二维码不能完成 Unity 公开读取闭环。
 
 A1 配置：
 
@@ -127,6 +142,11 @@ GitHub 仓库必须提供 `TENCENT_REGISTRY_USER` 和
 - root 能管理全部组织、域名和组合；
 - admin 属于多个组织时能管理这些组织 JSON，不能读取其他组织；
 - admin 不能修改域名 JSON 或组合授权；
+- 域名表单只编辑 `StaticDomainConfig` JSON，`configKey` 来自 `config.name`，显示名
+  来自 `config.description`，不再录入精确 hostname；
+- JSON 编辑器能格式化、压缩并实时报告语法/Schema 错误，校验失败不能提交；
+- 验证 `d.dev.xrugc.com` 等具体 host 与 `dev.xrugc.com` 配置键的域名族语义，不把
+  host 错当成二维码索引；
 - user / manager 无法进入插件且管理 API 返回 403；
 - 新组织、新域名和新组合都默认停用；
 - 只有三层都启用的组合可由 A1 返回；
@@ -134,5 +154,11 @@ GitHub 仓库必须提供 `TENCENT_REGISTRY_USER` 和
 - ETag 命中返回 304；
 - 主后端不可用时不放行管理写操作；
 - 插件后端不可用时 A1 返回 503；
+- A1 白牌路由确已实现和部署后，才把二维码标记为完整可用；
 - 两份 JSON 均不存在 token、password、secret、privateKey 等字段；
 - 生产二维码 URL 使用 HTTPS 且来自固定 `A1_PUBLIC_BASE_URL`。
+
+当前 develop 数据库已确认没有历史域名记录，因此本次语义切换不需要 DDL 或回填。
+在进入 main/publish 前仍必须重新审计目标库；若存在旧版任意 JSON 行，应先停用并
+人工转换为自包含 `StaticDomainConfig`，保持原数字 `domainId` 后再启用，不能把旧
+JSON 强制伪装成新 Schema。
