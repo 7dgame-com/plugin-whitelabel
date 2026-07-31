@@ -127,6 +127,11 @@ admin 可以属于多个组织。后端将 `verify-token` 返回的全部
 | `is_enabled` | 是否可参与 Unity 解析 |
 | 审计字段 | 创建、更新、启停用户及时间 |
 
+`config_json` 是配置键和说明的权威来源。`domain`、`display_name` 只是写入时同步的
+数据库投影；列表、组合与 Unity 解析在读取时仍从 `config_json.name` 和
+`config_json.description` 派生，历史投影值不能覆盖 JSON。说明为空或纯空白时仅在
+界面回退显示配置键，不把配置键写回 `description`。
+
 域名记录不硬删除。修改 `config.name` 会更新 `configKey`，但保留相同的数字
 `domainId`，所以二维码不需要暴露配置键。配置键表示域名族：主前端的匹配器可能让
 多个请求 hostname 命中它，例如 `d.dev.xrugc.com` 和 `dev.xrugc.com` 都可命中

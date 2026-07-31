@@ -70,8 +70,10 @@
       <el-table-column :label="t('domain.agentLabel')" min-width="220">
         <template #default="{ row }">
           <div class="identity-cell">
-            <strong v-if="row.domainDescription || row.domainConfigKey">
-              {{ row.domainDescription || row.domainConfigKey }}
+            <strong
+              v-if="domainDescriptionLabel(row.domainDescription, row.domainConfigKey)"
+            >
+              {{ domainDescriptionLabel(row.domainDescription, row.domainConfigKey) }}
             </strong>
             <strong v-else>
               {{ t('domain.agentLabel') }} #{{ row.domainId }}
@@ -207,6 +209,7 @@ import {
   filterAssignmentsForViewer,
   isAssignmentEffective,
 } from '../domain/assignment'
+import { domainDescriptionLabel } from '../domain/domainIdentity'
 import { isValidWhiteLabelQrUrl } from '../domain/qrUrl'
 import type {
   AssignmentInput,

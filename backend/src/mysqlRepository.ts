@@ -60,6 +60,7 @@ interface AssignmentRow extends AuditRow {
   organization_enabled: number | boolean;
   domain: string;
   display_name: string;
+  domain_config_json: string | JsonObject;
   domain_enabled: number | boolean;
 }
 
@@ -80,6 +81,10 @@ interface ResolvedRow extends RowDataPacket {
 
 interface CountRow extends RowDataPacket {
   total: string | number;
+}
+
+interface IdRow extends RowDataPacket {
+  id: string | number;
 }
 
 function mysqlCode(error: unknown): string | undefined {
@@ -131,8 +136,8 @@ function mapDomain(row: DomainRow): DomainConfig {
   const config = parseJson<StaticDomainConfig>(row.config_json);
   return {
     domainId: Number(row.id),
-    configKey: row.domain,
-    displayName: row.display_name,
+    configKey: config.name,
+    displayName: domainDisplayName(config),
     config,
     schemaVersion: Number(row.schema_version),
     revision: Number(row.revision),
@@ -142,6 +147,7 @@ function mapDomain(row: DomainRow): DomainConfig {
 }
 
 function mapAssignment(row: AssignmentRow): Assignment {
+  const domainConfig = parseJson<StaticDomainConfig>(row.domain_config_json);
   return {
     assignmentId: Number(row.assignment_id),
     organizationId: Number(row.organization_id),
@@ -154,8 +160,8 @@ function mapAssignment(row: AssignmentRow): Assignment {
       enabled: Boolean(row.organization_enabled),
     },
     domain: {
-      configKey: row.domain,
-      displayName: row.display_name,
+      configKey: domainConfig.name,
+      displayName: domainDisplayName(domainConfig),
       enabled: Boolean(row.domain_enabled),
     },
     ...auditFields(row),
@@ -163,6 +169,7 @@ function mapAssignment(row: AssignmentRow): Assignment {
 }
 
 function mapResolved(row: ResolvedRow): ResolvedWhiteLabel {
+  const domainConfig = parseJson<StaticDomainConfig>(row.domain_config_json);
   return {
     assignmentRevision: Number(row.assignment_revision),
     organization: {
@@ -175,10 +182,10 @@ function mapResolved(row: ResolvedRow): ResolvedWhiteLabel {
     },
     domain: {
       id: Number(row.domain_id),
-      configKey: row.domain,
+      configKey: domainConfig.name,
       revision: Number(row.domain_revision),
       schemaVersion: Number(row.domain_schema_version),
-      config: parseJson<StaticDomainConfig>(row.domain_config_json),
+      config: domainConfig,
     },
   };
 }
@@ -213,6 +220,7 @@ const assignmentSelect = `
     o.is_enabled AS organization_enabled,
     d.domain,
     d.display_name,
+    d.config_json AS domain_config_json,
     d.is_enabled AS domain_enabled
   FROM white_label_assignment a
   INNER JOIN white_label_organization_config o ON o.organization_id = a.organization_id
@@ -224,6 +232,26 @@ export class MysqlWhiteLabelRepository implements WhiteLabelRepository {
 
   async health(): Promise<void> {
     await this.pool.query('SELECT 1');
+  }
+
+  private async domainConfigNameExists(
+    configKey: string,
+    excludingDomainId?: number,
+  ): Promise<boolean> {
+    const parameters: SqlParameter[] = [configKey];
+    const excludeSql = excludingDomainId === undefined ? '' : 'AND id <> ?';
+    if (excludingDomainId !== undefined) {
+      parameters.push(excludingDomainId);
+    }
+    const [rows] = await this.pool.execute<IdRow[]>(
+      `SELECT id
+       FROM white_label_domain_config
+       WHERE JSON_UNQUOTE(JSON_EXTRACT(config_json, '$.name')) = ?
+         ${excludeSql}
+       LIMIT 1`,
+      parameters,
+    );
+    return rows.length > 0;
   }
 
   async listOrganizationConfigs(
@@ -379,7 +407,11 @@ export class MysqlWhiteLabelRepository implements WhiteLabelRepository {
     const parameters: SqlParameter[] = [];
     if (options.q !== undefined) {
       const pattern = searchPattern(options.q);
-      where.push(`(domain LIKE ? ESCAPE '=' OR display_name LIKE ? ESCAPE '=')`);
+      where.push(`(
+        JSON_UNQUOTE(JSON_EXTRACT(config_json, '$.name')) LIKE ? ESCAPE '='
+        OR JSON_UNQUOTE(JSON_EXTRACT(config_json, '$.description'))
+          COLLATE utf8mb4_unicode_ci LIKE ? ESCAPE '='
+      )`);
       parameters.push(pattern, pattern);
     }
     const whereSql = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
@@ -398,6 +430,9 @@ export class MysqlWhiteLabelRepository implements WhiteLabelRepository {
   }
 
   async createDomainConfig(input: DomainConfigInput, actorId: string): Promise<DomainConfig> {
+    if (await this.domainConfigNameExists(input.config.name)) {
+      throw conflict('DOMAIN_CONFIG_CONFLICT', 'The domain config key is already configured');
+    }
     let result: ResultSetHeader;
     try {
       [result] = await this.pool.execute<ResultSetHeader>(
@@ -458,6 +493,9 @@ export class MysqlWhiteLabelRepository implements WhiteLabelRepository {
           message: 'config.is_active must remain true while the plugin domain configuration is enabled',
         }],
       );
+    }
+    if (await this.domainConfigNameExists(input.config.name, domainId)) {
+      throw conflict('DOMAIN_CONFIG_CONFLICT', 'The domain config key is already configured');
     }
 
     let result: ResultSetHeader;
@@ -555,8 +593,9 @@ export class MysqlWhiteLabelRepository implements WhiteLabelRepository {
       where.push(`(
         o.organization_name LIKE ? ESCAPE '='
         OR o.organization_title LIKE ? ESCAPE '='
-        OR d.domain LIKE ? ESCAPE '='
-        OR d.display_name LIKE ? ESCAPE '='
+        OR JSON_UNQUOTE(JSON_EXTRACT(d.config_json, '$.name')) LIKE ? ESCAPE '='
+        OR JSON_UNQUOTE(JSON_EXTRACT(d.config_json, '$.description'))
+          COLLATE utf8mb4_unicode_ci LIKE ? ESCAPE '='
       )`);
       parameters.push(pattern, pattern, pattern, pattern);
     }

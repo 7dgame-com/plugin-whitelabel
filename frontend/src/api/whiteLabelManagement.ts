@@ -85,19 +85,19 @@ export function normalizeDomainConfig(value: unknown): DomainConfigRecord {
   const raw = asRecord(value)
   const config = jsonObject(raw.config)
   const configKey = stringValue(
+    config.name,
     raw.configKey,
     raw.domainConfigKey,
     raw.domain,
-    config.name,
   )
   return {
     domainId: numberValue(raw.domainId),
     configKey,
     description: stringValue(
+      config.description,
       raw.description,
       raw.domainDescription,
       raw.displayName,
-      config.description,
       configKey,
     ),
     schemaVersion: numberValue(raw.schemaVersion),

@@ -126,6 +126,9 @@ Unity 解析链路均不受影响。单个条目不符合插件 Schema 时只禁
 `config.name` 完全相等；服务端从 `config.description` 派生只读 `displayName`。
 客户端不提交 `displayName` 或当前访问 host。
 
+响应同样以完整 JSON 为准：`configKey` 始终取 `config.name`，显示说明始终取
+`config.description`；说明为空或纯空白时，前端才临时回退显示 `configKey`。
+
 更新请求增加 `revision`，其余字段保持相同。`config.name` 必须符合主前端静态配置
 键的规范并与返回的 `configKey` 一致；例如请求 host `d.dev.xrugc.com` 对应的配置键
 可以是 `dev.xrugc.com`。修改配置键不会改变插件数字 `domainId`。

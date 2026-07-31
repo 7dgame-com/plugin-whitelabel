@@ -95,6 +95,21 @@ describeIntegration('MySQL white-label repository', () => {
       configKey: 'dev.xrugc.com',
       displayName: 'Integration Agent',
     });
+    await pool.execute(
+      `UPDATE white_label_domain_config
+       SET domain = ?, display_name = ?
+       WHERE id = ?`,
+      ['legacy-exact-host.example.com', 'Legacy exact host', domain.domainId],
+    );
+    await expect(repository.findDomainConfig(domain.domainId)).resolves.toMatchObject({
+      configKey: domainSnapshot.name,
+      displayName: domainSnapshot.description,
+    });
+    await expect(repository.createDomainConfig({
+      configKey: domainSnapshot.name,
+      schemaVersion: 1,
+      config: domainSnapshot,
+    }, '9001')).rejects.toMatchObject({ status: 409 });
     const domains = await repository.listDomainConfigs({
       q: 'integration',
       limit: 100,

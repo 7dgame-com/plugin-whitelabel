@@ -42,10 +42,13 @@
       :empty-text="t('common.noData')"
     >
       <el-table-column
-        prop="description"
         :label="t('domain.descriptionField')"
         min-width="180"
-      />
+      >
+        <template #default="{ row }">
+          {{ domainDescriptionLabel(row.description, row.configKey) }}
+        </template>
+      </el-table-column>
       <el-table-column :label="t('domain.configKey')" min-width="220">
         <template #default="{ row }">
           <div class="identity-cell">
@@ -132,6 +135,7 @@ import {
   updateDomainConfig,
 } from '../api/whiteLabelManagement'
 import { useAuthSession } from '../composables/useAuthSession'
+import { domainDescriptionLabel } from '../domain/domainIdentity'
 import type {
   DomainConfigRecord,
   StaticDomainConfig,

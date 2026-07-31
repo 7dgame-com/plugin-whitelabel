@@ -17,8 +17,10 @@
         }}
         ×
         {{
-          assignment.domainDescription ||
-          assignment.domainConfigKey ||
+          domainDescriptionLabel(
+            assignment.domainDescription,
+            assignment.domainConfigKey,
+          ) ||
           `#${assignment.domainId}`
         }}
       </strong>
@@ -62,6 +64,7 @@ import { computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import QrcodeVue from 'qrcode.vue'
 import { useI18n } from 'vue-i18n'
+import { domainDescriptionLabel } from '../domain/domainIdentity'
 import type { AssignmentRecord } from '../domain/types'
 import { isValidWhiteLabelQrUrl } from '../domain/qrUrl'
 

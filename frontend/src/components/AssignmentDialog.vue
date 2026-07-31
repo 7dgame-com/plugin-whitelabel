@@ -65,11 +65,11 @@
             :key="item.domainId"
             :value="item.domainId"
             :label="
-              `${item.description || item.configKey} (${item.configKey} · #${item.domainId})`
+              `${domainDescriptionLabel(item.description, item.configKey)} (${item.configKey} · #${item.domainId})`
             "
           >
             <span>
-              {{ item.description || item.configKey }} ·
+              {{ domainDescriptionLabel(item.description, item.configKey) }} ·
               {{ item.configKey }}
             </span>
             <el-tag
@@ -103,6 +103,7 @@
 import { reactive, ref, watch } from 'vue'
 import { type FormInstance, type FormRules } from 'element-plus'
 import { useI18n } from 'vue-i18n'
+import { domainDescriptionLabel } from '../domain/domainIdentity'
 import type {
   AssignmentInput,
   DomainConfigRecord,

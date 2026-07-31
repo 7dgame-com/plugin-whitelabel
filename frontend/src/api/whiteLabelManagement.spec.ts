@@ -153,11 +153,12 @@ describe('three-resource management API contract', () => {
     )
   })
 
-  it('normalizes the domain key and derives its label from config.description', () => {
+  it('treats config.name and config.description as authoritative domain identity', () => {
     expect(
       normalizeDomainConfig({
         domainId: 8,
-        configKey: 'dev.xrugc.com',
+        configKey: 'legacy-exact-host.example.com',
+        displayName: 'Legacy exact host',
         schemaVersion: 1,
         revision: 2,
         enabled: true,
@@ -175,6 +176,27 @@ describe('three-resource management API contract', () => {
       configKey: 'dev.xrugc.com',
       description: 'XR UGC Dev',
     })
+  })
+
+  it('preserves an empty JSON description for presentation-layer fallback', () => {
+    expect(
+      normalizeDomainConfig({
+        domainId: 8,
+        configKey: 'legacy-exact-host.example.com',
+        displayName: 'Legacy exact host',
+        schemaVersion: 1,
+        revision: 2,
+        enabled: true,
+        config: {
+          name: 'dev.xrugc.com',
+          description: '',
+          is_active: true,
+          fallback_domain: null,
+          default_config: {},
+          configs: {},
+        },
+      }).description,
+    ).toBe('')
   })
 
   it('loads and normalizes the one-time main-frontend import catalog', async () => {
