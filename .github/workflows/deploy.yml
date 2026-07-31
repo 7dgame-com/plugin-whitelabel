@@ -1,0 +1,136 @@
+name: Docker Build & Push
+
+on:
+  push:
+    branches: [develop, main, publish]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: hkccr.ccs.tencentyun.com
+
+jobs:
+  validate:
+    name: Validate Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: integration-root-password
+          MYSQL_DATABASE: whitelabel_test
+          MYSQL_USER: whitelabel
+          MYSQL_PASSWORD: integration-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -u root -pintegration-root-password"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.1
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type check, unit test and build
+        run: pnpm check
+
+      - name: Run repository integration test
+        env:
+          MYSQL_TEST_HOST: 127.0.0.1
+          MYSQL_TEST_PORT: 3306
+          MYSQL_TEST_DATABASE: whitelabel_test
+          MYSQL_TEST_USER: whitelabel
+          MYSQL_TEST_PASSWORD: integration-password
+        run: pnpm --filter @7dgame/plugin-whitelabel-backend test:mysql
+
+  build-and-push:
+    name: Build & Push ${{ matrix.component }}
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: frontend
+            image: hkccr.ccs.tencentyun.com/plugins/plugin-whitelabel-frontend
+            dockerfile: frontend/Dockerfile
+          - component: backend
+            image: hkccr.ccs.tencentyun.com/plugins/plugin-whitelabel-backend
+            dockerfile: backend/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to Tencent registry
+        shell: bash
+        env:
+          TENCENT_REGISTRY_USER: ${{ secrets.TENCENT_REGISTRY_USER }}
+          TENCENT_REGISTRY_PASSWORD: ${{ secrets.TENCENT_REGISTRY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${TENCENT_REGISTRY_USER}" || -z "${TENCENT_REGISTRY_PASSWORD}" ]]; then
+            echo "Tencent registry Actions Secrets are not available to this repository."
+            exit 1
+          fi
+          for attempt in 1 2 3 4 5; do
+            if printf '%s' "${TENCENT_REGISTRY_PASSWORD}" | docker login "${REGISTRY}" \
+              --username "${TENCENT_REGISTRY_USER}" \
+              --password-stdin; then
+              exit 0
+            fi
+            sleep_seconds=$((attempt * 10))
+            echo "Registry login failed on attempt ${attempt}; retrying in ${sleep_seconds}s..."
+            docker logout "${REGISTRY}" || true
+            sleep "${sleep_seconds}"
+          done
+          echo "Registry login failed after 5 attempts."
+          exit 1
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ${{ matrix.image }}
+          tags: |
+            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=publish,enable=${{ github.ref == 'refs/heads/publish' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/publish' }}
+
+      - uses: docker/build-push-action@v6
+        id: build
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=whitelabel-${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=whitelabel-${{ matrix.component }}
+          provenance: false
+
+      - name: Report image digest
+        run: echo "${{ matrix.image }}@${{ steps.build.outputs.digest }}"

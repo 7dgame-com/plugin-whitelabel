@@ -19,4 +19,6 @@ COPY frontend/docker-entrypoint.sh /docker-entrypoint-custom.sh
 RUN chmod +x /docker-entrypoint-custom.sh
 
 EXPOSE 80
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1/health || exit 1
 ENTRYPOINT ["/docker-entrypoint-custom.sh"]

@@ -86,7 +86,7 @@ backend/db/schema.sql
 
 脚本只创建插件自己的三张业务表，不修改主平台数据库。
 
-## 6. 分支与 CI
+## 6. 分支与 CI/CD
 
 本仓库使用：
 
@@ -94,8 +94,33 @@ backend/db/schema.sql
 - `main`：稳定版本；
 - `publish`：生产发布。
 
-首次交付先建立并推送三个分支。CI/CD 工作流留待后续共同确认，不在当前版本自动
-发布或部署。
+三个分支的 push 都会运行：
+
+1. Node.js 22 与 pnpm 10.12.1 锁定安装；
+2. TypeScript/Vue 类型检查、单元测试和生产构建；
+3. 使用 MySQL 8 service 的真实 repository 集成测试；
+4. Docker 发布工作流内的同等质量门禁；
+5. 质量门禁通过后构建 `linux/amd64` 前后端镜像并推送腾讯容器镜像服务。
+
+镜像地址：
+
+```text
+hkccr.ccs.tencentyun.com/plugins/plugin-whitelabel-frontend
+hkccr.ccs.tencentyun.com/plugins/plugin-whitelabel-backend
+```
+
+tag 规则：
+
+| Git 分支 | 镜像 tag |
+|---|---|
+| `develop` | `develop` |
+| `main` | `main` |
+| `publish` | `publish`、`latest` |
+
+GitHub 仓库必须提供 `TENCENT_REGISTRY_USER` 和
+`TENCENT_REGISTRY_PASSWORD` Actions Secrets。两个镜像都从仓库根目录构建，以便使用
+同一份 pnpm workspace 锁文件；数据库继续使用腾讯环境中的标准 MySQL 8 服务，不会
+上传数据库镜像。
 
 ## 7. 发布前检查
 
