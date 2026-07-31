@@ -105,8 +105,14 @@ pnpm dev
 - `main`：经过验证的稳定代码；
 - `publish`：生产发布分支。
 
-首次交付会建立并推送三个分支。CI 工作流不在本次提交中配置，后续共同确认发布
-规则后再加入。
+三个分支的 push 都会执行类型检查、单元测试、真实 MySQL 集成测试和生产构建。
+验证通过后，Docker 工作流会向腾讯容器镜像服务推送两个独立镜像：
+
+- `hkccr.ccs.tencentyun.com/plugins/plugin-whitelabel-frontend`；
+- `hkccr.ccs.tencentyun.com/plugins/plugin-whitelabel-backend`。
+
+分支与镜像 tag 一一对应；`publish` 还会同时更新 `latest`。数据库使用标准 MySQL 8，
+不构建或发布插件私有数据库镜像。详细规则见[部署文档](docs/deployment.md#6-分支与-cicd)。
 
 ## 安全约束
 
