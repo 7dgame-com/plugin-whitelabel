@@ -18,9 +18,10 @@ root 明确启用。
 
 例如主前端请求 host `d.dev.xrugc.com` 会按静态候选键规则命中
 `dev.xrugc.com`；域名 JSON 的 `config.name` 保存这个 `configKey`。插件自己的
-数字 `domainId` 才是组合外键和二维码参数 `d`。插件只保存独立快照，运行时不会
-读取或修改主前端 `web/public/config/domains/*.json`；若同一配置也要在主前端生效，
-必须在主前端仓库单独新增 `{configKey}.json` 并发布。
+数字 `domainId` 才是组合外键和二维码参数 `d`。root 可以从主前端发布的域名清单
+搜索并把完整 JSON 一次性导入编辑器；保存后插件只使用自己的独立快照，不会继续
+同步或修改主前端文件。若同一配置也要在主前端生效，必须在主前端仓库单独新增
+`{configKey}.json` 并发布。
 
 ## 权限矩阵
 
@@ -62,11 +63,12 @@ pnpm --filter plugin-whitelabel-frontend dev
 
 ## 管理 API
 
-前端只使用三个插件后端资源：
+前端使用三个业务资源和一个 root-only 导入辅助接口：
 
 - `/backend/api/v1/organization-configs`
 - `/backend/api/v1/domain-configs`
 - `/backend/api/v1/assignments`
+- `/backend/api/v1/domain-import-catalog`
 
 列表统一发送 `q / page / pageSize`。创建请求不发送 `enabled`，由服务端默认
 停用；更新与启停携带当前 `revision` 做乐观锁。新建使用 `schemaVersion: 1`，
@@ -80,7 +82,8 @@ pnpm --filter plugin-whitelabel-frontend dev
 
 当前只接受 `schemaVersion: 1`。域名 JSON 必须是可直接下发给 Unity 的自包含快照；
 `fallback_domain` 仅保留作格式兼容元数据，客户端不会再按它请求另一份配置。导入
-依赖外部 fallback 的主前端文件时，需要先把 Unity 所需内容物化到当前 JSON。
+按钮会完整替换编辑器内容而不合并；主前端文档缺失的默认或语言配置只由插件后端在
+导入时从同一清单有界、逐层物化。清单加载失败不会禁用手工编辑。
 
 关键写入 DTO：
 

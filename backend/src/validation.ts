@@ -188,7 +188,15 @@ export const updateOrganizationConfigSchema = z
 
 const jsonObjectSchema = z.record(jsonFieldNameSchema, jsonValueSchema);
 
-export const staticDomainConfigSchema = rawConfigSecuritySchema.pipe(
+export function hasLocalDomainConfigData(
+  config: Pick<StaticDomainConfig, 'default_config' | 'configs'>,
+): boolean {
+  return Object.keys(config.default_config).length > 0
+    || Object.values(config.configs)
+      .some((localizedConfig) => Object.keys(localizedConfig).length > 0);
+}
+
+export const staticDomainConfigStructureSchema = rawConfigSecuritySchema.pipe(
   z.object({
     name: domainConfigKeySchema,
     description: z.string().max(191),
@@ -206,23 +214,23 @@ export const staticDomainConfigSchema = rawConfigSecuritySchema.pipe(
           message: 'description is required when config.name exceeds 191 characters',
         });
       }
-      const hasDefaultConfig = Object.keys(config.default_config).length > 0;
-      const hasLocalizedConfig = Object.values(config.configs)
-        .some((localizedConfig) => Object.keys(localizedConfig).length > 0);
-      if (
-        config.fallback_domain !== null
-        && config.fallback_domain !== config.name
-        && !hasDefaultConfig
-        && !hasLocalizedConfig
-      ) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['fallback_domain'],
-          message: 'an external fallback requires local default_config or configs data; Unity snapshots must be self-contained',
-        });
-      }
     }),
 ) as ZodType<StaticDomainConfig>;
+
+export const staticDomainConfigSchema = staticDomainConfigStructureSchema
+  .superRefine((config, context) => {
+    if (
+      config.fallback_domain !== null
+      && config.fallback_domain !== config.name
+      && !hasLocalDomainConfigData(config)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['fallback_domain'],
+        message: 'an external fallback requires local default_config or configs data; Unity snapshots must be self-contained',
+      });
+    }
+  }) as ZodType<StaticDomainConfig>;
 
 function matchingDomainConfigKey(
   value: { configKey: string; config: StaticDomainConfig },

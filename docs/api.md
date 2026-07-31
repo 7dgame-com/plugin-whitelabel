@@ -63,6 +63,7 @@ JSON，但不能借由任一组织权限读取其他组织或域名 JSON。
 hostname：
 
 ```http
+GET  /api/v1/domain-import-catalog
 GET  /api/v1/domain-configs?page=1&pageSize=20&q=agent
 POST /api/v1/domain-configs
 GET  /api/v1/domain-configs/{domainId}
@@ -70,6 +71,33 @@ PUT  /api/v1/domain-configs/{domainId}
 POST /api/v1/domain-configs/{domainId}/enable
 POST /api/v1/domain-configs/{domainId}/disable
 ```
+
+`domain-import-catalog` 是 root-only 的辅助读取接口。它只访问后端环境变量指定的主
+前端 origin，并固定请求 `/config/domains/manifest.json`；浏览器不能提交任意 URL。
+响应中的 `config` 可一次性复制进编辑器：
+
+```json
+{
+  "source": "https://d.dev.xrugc.com/config/domains/manifest.json",
+  "items": [
+    {
+      "configKey": "dev.xrugc.com",
+      "description": "XR UGC Dev",
+      "isActive": true,
+      "importable": true,
+      "materializedFrom": [],
+      "warnings": [],
+      "config": {}
+    }
+  ]
+}
+```
+
+未配置来源、超时或清单顶层无效时仅该接口返回 `503`，手工编辑、CRUD、健康检查及
+Unity 解析链路均不受影响。单个条目不符合插件 Schema 时只禁用该项，不会隐藏其他
+合法项。外部 fallback 由后端从同一清单做最多 8 层、带循环检测的逐层物化：本地非
+空默认配置优先，语言配置按语言键分别覆盖；不能安全物化的条目返回
+`importable: false` 和 `reason`，不会写数据库。
 
 创建示例：
 
@@ -113,8 +141,10 @@ POST /api/v1/domain-configs/{domainId}/disable
 | `default_config` | 必填 object |
 | `configs` | 必填 object；每个语言键的值必须为 object |
 
-插件不会在运行时访问或改写主前端文件。如果同一个新键也要在主前端生效，需要在
-主前端仓库单独增加 `web/public/config/domains/{configKey}.json` 并发布。
+插件只在 root 主动打开管理弹窗时通过上述目录接口读取主前端清单，且永不改写主
+前端文件。导入是完整的一次性复制，不是合并或同步。如果同一个新键也要在主前端
+生效，需要在主前端仓库单独增加
+`web/public/config/domains/{configKey}.json` 并发布。
 `fallback_domain` 只作为格式兼容元数据返回，插件、A1 和 Unity 不沿它递归读取其他
 文件。提交给插件的快照必须已经包含 Unity 所需的有效内容；外部 fallback 且
 `default_config`、`configs` 都为空的纯引用文档会被拒绝。

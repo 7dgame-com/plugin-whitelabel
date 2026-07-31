@@ -21,6 +21,7 @@
 flowchart LR
     Host["主前端 / PluginSystem"] -->|"iframe + INIT token"| UI["插件前端"]
     UI -->|"Bearer token"| API["插件后端"]
+    API -.->|"仅 root 导入时 GET 公开 domain manifest"| Host
     API -->|"verify-token"| Main["现有主后端"]
     API --> DB[("插件独立 MySQL")]
     UI -->|"显示 HTTPS QR"| QR["A1 URL: ?o=组织ID&d=域名ID"]
@@ -32,9 +33,10 @@ flowchart LR
 
 - 只通过现有插件系统加载 iframe；
 - 继续使用 `PLUGIN_READY -> INIT`、token 更新、主题和语言协议；
-- 不新增白牌页面、路由或白牌状态。
-- `web/src/api/domain-static-config.ts` 及 `web/public/config/domains/*.json` 只作为
-  数据结构和匹配语义的基准；插件运行时不读取也不写入这些文件；
+- 不新增白牌页面、业务路由或白牌状态；构建时只把已有公开域名 JSON 汇总为
+  `/config/domains/manifest.json`；
+- `web/src/api/domain-static-config.ts` 及 `web/public/config/domains/*.json` 仍是
+  数据结构和匹配语义的权威来源；插件只在 root 主动导入时读取清单，永不写入；
 - 如果配置也需要在主前端生效，必须在主前端仓库单独增加
   `web/public/config/domains/{configKey}.json` 并发布主前端。
 
@@ -53,6 +55,8 @@ flowchart LR
 - 两份 JSON 的字段名限制为可审计的 ASCII 标识符，并递归拒绝认证、token、密码、
   私钥和连接串等敏感字段；
 - 向 A1 暴露固定 token 保护的内部只读解析接口。
+- 可从部署时固定的主前端 HTTPS origin 读取 root-only 导入清单；浏览器不能指定
+  URL，清单不可用也不会影响健康检查、CRUD 或 Unity 解析；
 - 域名配置以完整 `StaticDomainConfig` JSON 独立存储，`config.name` 派生
   `configKey`，`config.description` 派生只读显示名；不保存当前访问 host。
 
@@ -74,6 +78,7 @@ flowchart LR
 |---|---:|---:|
 | 查看全部组织配置 | 是 | 否 |
 | 创建、编辑、启停自己组织的 JSON | 是 | 是 |
+| 从主前端清单导入域名 JSON | 是 | 否 |
 | 创建、编辑、启停域名 JSON | 是 | 否 |
 | 创建、启停组织 × 域名组合 | 是 | 否 |
 | 查看自己组织的组合和二维码 | 是 | 是 |
@@ -127,9 +132,10 @@ admin 可以属于多个组织。后端将 `verify-token` 返回的全部
 多个请求 hostname 命中它，例如 `d.dev.xrugc.com` 和 `dev.xrugc.com` 都可命中
 `dev.xrugc.com`。
 
-插件中的快照和主前端静态文件没有运行时同步关系。若要让主前端识别一个新键，需要
-另行创建并发布 `web/public/config/domains/{configKey}.json`；仅在插件创建记录不会
-改变主前端行为。
+插件中的快照和主前端静态文件没有运行时同步关系。root 可把清单中的一项完整复制
+进编辑器，但保存后不会跟随主前端变化。若要让主前端识别一个新键，需要另行创建并
+发布 `web/public/config/domains/{configKey}.json`；仅在插件创建记录不会改变主前端
+行为。
 
 ### `white_label_assignment`
 

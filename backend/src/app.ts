@@ -9,6 +9,7 @@ import express, {
 import {
   AppError,
   badRequest,
+  domainCatalogUnavailable,
   forbidden,
   notFound,
   organizationNotFound,
@@ -16,6 +17,7 @@ import {
   unauthorized,
   unprocessable,
 } from './errors';
+import type { DomainImportCatalog } from './domainImportCatalog';
 import type {
   Assignment,
   AuthenticatedSession,
@@ -49,6 +51,7 @@ export interface AppDependencies {
   organizationDirectory: OrganizationDirectory;
   internalApiToken: string;
   a1PublicBaseUrl: URL;
+  domainImportCatalog?: DomainImportCatalog;
 }
 
 interface ManagementContext {
@@ -452,6 +455,27 @@ function createDomainRouter(repository: WhiteLabelRepository): express.Router {
   return router;
 }
 
+function createDomainImportCatalogRouter(
+  catalog: DomainImportCatalog | undefined,
+): express.Router {
+  const router = express.Router();
+
+  router.get('/', asyncHandler(async (_request, response) => {
+    requireRoot(response);
+    if (!catalog) {
+      throw domainCatalogUnavailable();
+    }
+    try {
+      const result = await catalog.list();
+      response.set('Cache-Control', 'no-store').json(result);
+    } catch {
+      throw domainCatalogUnavailable();
+    }
+  }));
+
+  return router;
+}
+
 function createAssignmentRouter(
   repository: WhiteLabelRepository,
   a1PublicBaseUrl: URL,
@@ -571,6 +595,11 @@ export function createApp(dependencies: AppDependencies): express.Express {
     '/api/v1/organization-configs',
     managementAuth,
     createOrganizationRouter(dependencies.repository, dependencies.organizationDirectory),
+  );
+  app.use(
+    '/api/v1/domain-import-catalog',
+    managementAuth,
+    createDomainImportCatalogRouter(dependencies.domainImportCatalog),
   );
   app.use(
     '/api/v1/domain-configs',

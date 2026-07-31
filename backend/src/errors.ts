@@ -62,3 +62,11 @@ export function organizationDirectoryFailure(): AppError {
     'Unable to verify the organization against the main platform',
   );
 }
+
+export function domainCatalogUnavailable(): AppError {
+  return new AppError(
+    503,
+    'DOMAIN_CATALOG_UNAVAILABLE',
+    'The main-frontend domain import catalog is unavailable',
+  );
+}

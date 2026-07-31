@@ -1,6 +1,7 @@
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 import { createApp } from '../src/app';
+import type { DomainImportCatalog } from '../src/domainImportCatalog';
 import type {
   Assignment,
   AuthenticatedSession,
@@ -200,6 +201,7 @@ function app(
   repo: WhiteLabelRepository,
   session: AuthenticatedSession = rootSession(),
   organizationDirectory: OrganizationDirectory = directory(),
+  domainImportCatalog?: DomainImportCatalog,
 ) {
   return createApp({
     repository: repo,
@@ -207,6 +209,7 @@ function app(
     organizationDirectory,
     internalApiToken: INTERNAL_TOKEN,
     a1PublicBaseUrl: A1_BASE_URL,
+    domainImportCatalog,
   });
 }
 
@@ -215,6 +218,66 @@ describe('three-layer white-label backend', () => {
     const response = await request(app(repository())).get('/health');
     expect(response.status).toBe(200);
     expect(response.body.status).toBe('ok');
+  });
+
+  it('exposes the domain import catalog only to root', async () => {
+    const catalogResult = {
+      source: 'https://frontend.example.com/config/domains/manifest.json',
+      items: [{
+        configKey: 'dev.xrugc.com',
+        description: 'XR UGC Dev',
+        isActive: true,
+        importable: true,
+        materializedFrom: [],
+        warnings: [],
+        config: domainSnapshot(),
+      }],
+    };
+    const catalog: DomainImportCatalog = {
+      list: vi.fn().mockResolvedValue(catalogResult),
+    };
+
+    await request(app(repository(), rootSession(), directory(), catalog))
+      .get('/api/v1/domain-import-catalog')
+      .expect(401);
+    await request(app(repository(), adminSession(), directory(), catalog))
+      .get('/api/v1/domain-import-catalog')
+      .set('Authorization', 'Bearer session-token')
+      .expect(403);
+    expect(catalog.list).not.toHaveBeenCalled();
+
+    const response = await request(app(repository(), rootSession(), directory(), catalog))
+      .get('/api/v1/domain-import-catalog')
+      .set('Authorization', 'Bearer session-token');
+    expect(response.status).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.body).toEqual(catalogResult);
+    expect(catalog.list).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an unconfigured or failed import catalog isolated behind 503', async () => {
+    const repo = repository();
+    const serviceWithoutCatalog = app(repo);
+    await request(serviceWithoutCatalog)
+      .get('/health')
+      .expect(200);
+    const missing = await request(serviceWithoutCatalog)
+      .get('/api/v1/domain-import-catalog')
+      .set('Authorization', 'Bearer session-token');
+    expect(missing.status).toBe(503);
+    expect(missing.body.error.code).toBe('DOMAIN_CATALOG_UNAVAILABLE');
+
+    const failedCatalog: DomainImportCatalog = {
+      list: vi.fn().mockRejectedValue(new Error('upstream details must not leak')),
+    };
+    const failed = await request(app(repo, rootSession(), directory(), failedCatalog))
+      .get('/api/v1/domain-import-catalog')
+      .set('Authorization', 'Bearer session-token');
+    expect(failed.status).toBe(503);
+    expect(failed.body.error).toEqual({
+      code: 'DOMAIN_CATALOG_UNAVAILABLE',
+      message: 'The main-frontend domain import catalog is unavailable',
+    });
   });
 
   it('rejects authenticated users without root or admin', async () => {

@@ -81,4 +81,25 @@ describe('deployment contracts', () => {
     expect(editor).toContain('--json-syntax-string')
     expect(editor).toContain("'aria-describedby': statusId")
   })
+
+  it('imports main-frontend domain JSON as an explicit one-time replacement', () => {
+    const domainDialog = read('../components/DomainConfigDialog.vue')
+    const managementApi = read('../api/whiteLabelManagement.ts')
+    const domainPanel = read('../components/DomainConfigsPanel.vue')
+
+    expect(managementApi).toContain(
+      "backendApi.get('/domain-import-catalog')",
+    )
+    expect(domainDialog).toContain('filterable')
+    expect(domainDialog).toContain(':disabled="!item.importable || !item.config"')
+    expect(domainDialog).toContain('ElMessageBox.confirm')
+    expect(domainDialog).toContain(
+      'form.json = JSON.stringify(item.config, null, 2)',
+    )
+    expect(domainDialog).toContain('selectedCatalogItem.materializedFrom')
+    expect(domainDialog).toContain('selectedCatalogItem.warnings')
+    expect(domainDialog).toContain("t('domain.importOneTimeHint')")
+    expect(domainDialog).not.toContain('Object.assign')
+    expect(domainPanel).toContain('v-if="isRootUser"')
+  })
 })

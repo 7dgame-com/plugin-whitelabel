@@ -16,6 +16,22 @@ export interface StaticDomainConfig extends JsonObject {
   configs: { [locale: string]: JsonObject }
 }
 
+export interface DomainImportCatalogItem {
+  configKey: string
+  description: string
+  isActive: boolean
+  importable: boolean
+  materializedFrom: string[]
+  warnings: string[]
+  reason?: string
+  config?: StaticDomainConfig
+}
+
+export interface DomainImportCatalog {
+  source: string
+  items: DomainImportCatalogItem[]
+}
+
 export interface OrganizationSummary {
   id: number
   name: string

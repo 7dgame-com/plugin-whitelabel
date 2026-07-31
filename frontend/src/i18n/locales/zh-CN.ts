@@ -82,6 +82,23 @@ export default {
     editTitle: '编辑代理方域名 JSON',
     searchPlaceholder: '搜索配置说明或域名配置键',
     loadFailed: '加载域名配置失败',
+    importTitle: '从主前端 JSON 选择并导入',
+    importOneTimeHint:
+      '这里只执行一次性复制：导入会完整替换下方 JSON，保存后不会与主前端自动同步。',
+    importSelectPlaceholder: '搜索主前端配置键或说明',
+    importNoData: '没有可导入的主前端域名配置',
+    importAction: '导入到编辑器',
+    importMissingConfig: '接口未返回可复制的 JSON',
+    importLoadFailed: '主前端域名配置目录加载失败',
+    importManualFallback: '仍可继续在下方手工编辑和保存 JSON。',
+    importSource: '来源：{source}',
+    importMaterialized: '导入时已物化：{values}',
+    importWarnings: '导入提示：',
+    importConfirmTitle: '完整替换当前 JSON？',
+    importConfirmMessage:
+      '当前编辑器已有内容。导入不会合并字段，而会完整替换当前 JSON，是否继续？',
+    importConfirmButton: '替换并导入',
+    importSuccess: '已完整导入，请检查 JSON 后再保存',
     disableBeforeInactive:
       '该域名配置当前已启用。请先在列表中停用，再将 JSON 的 is_active 设置为 false。',
   },

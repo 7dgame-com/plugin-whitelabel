@@ -13,13 +13,53 @@ import {
   createAssignment,
   createDomainConfig,
   createOrganizationConfig,
+  getDomainImportCatalog,
   listAssignments,
   listOrganizationConfigs,
   normalizeAssignment,
   normalizeDomainConfig,
+  normalizeDomainImportCatalog,
+  normalizeDomainImportCatalogItem,
   setAssignmentEnabled,
   updateOrganizationConfig,
 } from './whiteLabelManagement'
+
+function catalogConfig() {
+  return {
+    name: 'xrugc-family',
+    description: 'XR UGC agent family',
+    is_active: true,
+    fallback_domain: null,
+    default_config: { theme: 'blue' },
+    configs: {},
+  }
+}
+
+function importableCatalogItem(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    configKey: 'xrugc-family',
+    description: 'XR UGC agent family',
+    isActive: true,
+    importable: true,
+    materializedFrom: ['base.json', 'xrugc-family.json'],
+    warnings: ['fallback was materialized'],
+    config: catalogConfig(),
+    ...overrides,
+  }
+}
+
+function catalogPayload(
+  itemOverrides: Record<string, unknown> = {},
+  rootOverrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    source: 'web/public/config/domains/index.json',
+    items: [importableCatalogItem(itemOverrides)],
+    ...rootOverrides,
+  }
+}
 
 describe('three-resource management API contract', () => {
   beforeEach(() => {
@@ -135,6 +175,210 @@ describe('three-resource management API contract', () => {
       configKey: 'dev.xrugc.com',
       description: 'XR UGC Dev',
     })
+  })
+
+  it('loads and normalizes the one-time main-frontend import catalog', async () => {
+    const config = catalogConfig()
+    vi.mocked(backendApi.get).mockResolvedValue({
+      data: {
+        data: {
+          source: 'web/public/config/domains/index.json',
+          items: [
+            {
+              configKey: 'xrugc-family',
+              description: 'XR UGC agent family',
+              isActive: true,
+              importable: true,
+              materializedFrom: ['base.json', 'xrugc-family.json'],
+              warnings: ['fallback was materialized'],
+              config,
+            },
+          ],
+        },
+      },
+    })
+
+    const result = await getDomainImportCatalog()
+
+    expect(backendApi.get).toHaveBeenCalledWith('/domain-import-catalog')
+    expect(result).toEqual({
+      source: 'web/public/config/domains/index.json',
+      items: [
+        {
+          configKey: 'xrugc-family',
+          description: 'XR UGC agent family',
+          isActive: true,
+          importable: true,
+          materializedFrom: ['base.json', 'xrugc-family.json'],
+          warnings: ['fallback was materialized'],
+          config,
+        },
+      ],
+    })
+  })
+
+  it('accepts an exact nonimportable item without fabricating config', () => {
+    expect(
+      normalizeDomainImportCatalogItem({
+        configKey: 'broken-family',
+        description: 'Broken family',
+        isActive: false,
+        importable: false,
+        materializedFrom: ['base.json'],
+        warnings: ['invalid schema'],
+        reason: 'The source JSON is invalid',
+      }),
+    ).toEqual({
+      configKey: 'broken-family',
+      description: 'Broken family',
+      isActive: false,
+      importable: false,
+      materializedFrom: ['base.json'],
+      warnings: ['invalid schema'],
+      reason: 'The source JSON is invalid',
+    })
+  })
+
+  it.each([
+    ['source', catalogPayload({}, { source: 42 }), /catalog\.source/],
+    ['items', catalogPayload({}, { items: {} }), /catalog\.items/],
+    [
+      'empty items',
+      { source: 'source', items: [] },
+      /at least one item/,
+    ],
+    ['item', { source: 'source', items: [null] }, /items\[0\]/],
+    ['configKey', catalogPayload({ configKey: 42 }), /configKey/],
+    ['description', catalogPayload({ description: null }), /description/],
+    ['isActive', catalogPayload({ isActive: 1 }), /isActive/],
+    ['importable', catalogPayload({ importable: 'true' }), /importable/],
+    [
+      'materializedFrom',
+      catalogPayload({ materializedFrom: ['base.json', 42] }),
+      /materializedFrom\[1\]/,
+    ],
+    ['warnings', catalogPayload({ warnings: 'warning' }), /warnings/],
+  ])('rejects a catalog with a non-exact %s field', (_field, value, message) => {
+    expect(() => normalizeDomainImportCatalog(value)).toThrow(message)
+  })
+
+  it.each([
+    [
+      'missing config',
+      catalogPayload({ config: undefined }),
+      /config/,
+    ],
+    [
+      'schema-invalid config',
+      catalogPayload({
+        config: {
+          name: 'xrugc-family',
+          description: 'XR UGC agent family',
+          is_active: true,
+          fallback_domain: null,
+          default_config: {},
+        },
+      }),
+      /StaticDomainConfig/,
+    ],
+    [
+      'unsafe config',
+      catalogPayload({
+        config: {
+          ...catalogConfig(),
+          default_config: { apiToken: 'must not be imported' },
+        },
+      }),
+      /StaticDomainConfig/,
+    ],
+    [
+      'configKey mismatch',
+      catalogPayload({
+        config: { ...catalogConfig(), name: 'different-family' },
+      }),
+      /config\.name/,
+    ],
+    [
+      'description mismatch',
+      catalogPayload({
+        config: { ...catalogConfig(), description: 'Different' },
+      }),
+      /config\.description/,
+    ],
+    [
+      'isActive mismatch',
+      catalogPayload({
+        config: { ...catalogConfig(), is_active: false },
+      }),
+      /config\.is_active/,
+    ],
+  ])('rejects importable catalog item with %s', (_case, value, message) => {
+    expect(() => normalizeDomainImportCatalog(value)).toThrow(message)
+  })
+
+  it.each([
+    [
+      'missing reason',
+      {
+        configKey: 'broken-family',
+        description: 'Broken family',
+        isActive: false,
+        importable: false,
+        materializedFrom: [],
+        warnings: [],
+      },
+      /reason/,
+    ],
+    [
+      'non-string reason',
+      {
+        configKey: 'broken-family',
+        description: 'Broken family',
+        isActive: false,
+        importable: false,
+        materializedFrom: [],
+        warnings: [],
+        reason: 42,
+      },
+      /reason/,
+    ],
+    [
+      'invalid materializedFrom',
+      {
+        configKey: 'broken-family',
+        description: 'Broken family',
+        isActive: false,
+        importable: false,
+        materializedFrom: [42],
+        warnings: [],
+        reason: 'Unavailable',
+      },
+      /materializedFrom/,
+    ],
+    [
+      'invalid warnings',
+      {
+        configKey: 'broken-family',
+        description: 'Broken family',
+        isActive: false,
+        importable: false,
+        materializedFrom: [],
+        warnings: [null],
+        reason: 'Unavailable',
+      },
+      /warnings/,
+    ],
+  ])('rejects nonimportable item with %s', (_case, value, message) => {
+    expect(() => normalizeDomainImportCatalogItem(value)).toThrow(message)
+  })
+
+  it('rejects a corrupted 200 response instead of returning an empty catalog', async () => {
+    vi.mocked(backendApi.get).mockResolvedValue({
+      data: catalogPayload({ isActive: 'true' }),
+    })
+
+    await expect(getDomainImportCatalog()).rejects.toThrow(/isActive/)
+    expect(backendApi.get).toHaveBeenCalledWith('/domain-import-catalog')
   })
 
   it('updates organization JSON with only revision, schema and config', async () => {

@@ -18,9 +18,11 @@ For example, the main frontend can resolve `d.dev.xrugc.com` through the
 `dev.xrugc.com` key. The numeric `domainId` remains the short, stable value used
 by QR parameter `d`.
 
-The plugin stores an independent full snapshot. It neither reads nor writes the
-main frontend's static files at runtime. Publishing the same key to the main
-frontend is a separate change and deployment.
+The plugin stores an independent full snapshot. A root-only management helper
+may read the main frontend's fixed public manifest and return a one-time import
+candidate, but saving never creates synchronization. Unity resolution neither
+reads nor writes the main frontend at runtime. Publishing the same key to the
+main frontend remains a separate change and deployment.
 
 ## Security boundaries
 
@@ -49,6 +51,10 @@ frontend is a separate change and deployment.
   `revision`.
 - QR URLs use only fixed `A1_PUBLIC_BASE_URL`; request headers cannot alter them.
   Production startup requires this URL to use HTTPS.
+- Domain imports use only the fixed `MAIN_FRONTEND_PUBLIC_BASE_URL` origin and
+  `/config/domains/manifest.json`. The client cannot select a URL, redirects are
+  rejected, response size/time/count are bounded, and production requires HTTPS.
+  Invalid individual entries are disabled without hiding valid entries.
 
 Organization and domain JSON use separate versioned schemas. Organization schema
 v1 requires a top-level object. Domain schema v1 validates the
@@ -73,6 +79,7 @@ Organization configuration (root/admin within scope):
 
 Domain configuration (root only):
 
+- `GET /api/v1/domain-import-catalog` — optional, one-time import candidates
 - `GET /api/v1/domain-configs`
 - `POST /api/v1/domain-configs`
 - `GET /api/v1/domain-configs/:domainId`
@@ -168,6 +175,12 @@ There is no `yii3-a3` service in this design.
 
 `A1_PUBLIC_BASE_URL` must be a pure origin such as `https://a1.example.com`;
 paths, queries, and fragments are rejected.
+
+`MAIN_FRONTEND_PUBLIC_BASE_URL` is optional and must also be a pure origin. If
+omitted or unavailable, only `GET /api/v1/domain-import-catalog` returns `503`;
+startup, health, CRUD, and internal resolution continue normally. Imported JSON
+is a snapshot and is never refreshed automatically. `DOMAIN_CATALOG_TIMEOUT_MS`
+defaults to 3000 and cannot exceed 10000.
 
 The MySQL repository integration test is opt-in and refuses database names that
 do not end in `_test`:

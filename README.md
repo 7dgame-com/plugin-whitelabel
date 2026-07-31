@@ -25,6 +25,7 @@
 
 plugin-whitelabel backend
   ├─ 逐请求调用主后端 /v1/plugin/verify-token
+  ├─ root 管理时可从主前端固定 manifest 一次性导入域名 JSON
   └─ 独立 MySQL
        ├─ white_label_organization_config
        ├─ white_label_domain_config
@@ -35,8 +36,9 @@ plugin-whitelabel backend
        └─ 内网调用 plugin backend /internal/v1/white-label-configs/resolve
 ```
 
-主前端和主后端均不新增白牌业务代码或白牌数据表。主后端只继续作为身份与组织
-权威源；规划中的 `yii3-a1` 只承担公开、只读的 Unity 网关。
+主前端只在构建时汇总已有公开域名 JSON，不新增白牌数据表或运行时业务；主后端也
+不新增白牌业务代码或数据表，只继续作为身份与组织权威源。`yii3-a1` 只承担公开、
+只读的 Unity 网关。
 
 > **当前状态：** `yii3-a1` 的白牌路由仍是接口草案，尚未部署。因此当前二维码
 > URL 代表最终协议，不能把它当作已经可用的线上接口；本项目不存在
@@ -46,11 +48,13 @@ plugin-whitelabel backend
 
 - 插件保存完整的域名 JSON 快照，`config.name` 就是 `configKey`，例如
   `dev.xrugc.com`；`config.description` 用作显示名称；
-- 插件运行时不读取、不修改，也不依赖主前端的
-  `web/public/config/domains/*.json`；主前端停机不会影响 Unity 解析已保存的快照；
-- 快照必须已经包含 Unity 所需的有效内容。`fallback_domain` 只保留为与主前端格式
-  对齐的元数据，插件、A1 和 Unity 都不会沿它递归抓取另一份配置；完全依赖外部
-  fallback 且自身内容为空的文档不能保存；
+- 主前端构建会把 `web/public/config/domains/*.json` 汇总为公开只读的
+  `/config/domains/manifest.json`；root 可以在域名弹窗中搜索并一次性导入；
+- 导入会完整替换编辑器内容，保存后成为插件自己的快照，不会自动同步。Unity、A1
+  和插件解析接口不读取 manifest，因此主前端停机不会影响已经保存的配置；
+- 快照必须已经包含 Unity 所需的有效内容。导入工具会从同一份 manifest 有界解析
+  外部 fallback，并分别补齐缺失的默认配置和语言配置；`fallback_domain` 仍只作为
+  格式元数据保存，插件解析接口、A1 和 Unity 都不会在运行时递归抓取；
 - 主前端现有匹配规则会去掉 `d.` / `www.` 并逐级尝试父域名，所以
   `d.dev.xrugc.com` 可以命中 `dev.xrugc.com`；
 - 如果同一配置也要被主前端识别，必须另行新增并发布

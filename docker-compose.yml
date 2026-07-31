@@ -38,6 +38,8 @@ services:
       DB_USER: ${WHITELABEL_DB_USER:-whitelabel}
       DB_PASSWORD: ${WHITELABEL_DB_PASSWORD:-local-whitelabel-password}
       MAIN_API_BASE_URL: ${MAIN_API_DOCKER_BASE_URL:-http://host.docker.internal:8081}
+      MAIN_FRONTEND_PUBLIC_BASE_URL: ${MAIN_FRONTEND_DOCKER_PUBLIC_BASE_URL:-}
+      DOMAIN_CATALOG_TIMEOUT_MS: ${DOMAIN_CATALOG_TIMEOUT_MS:-3000}
       A1_PUBLIC_BASE_URL: ${A1_PUBLIC_BASE_URL:-http://localhost:8888}
       WHITELABEL_INTERNAL_TOKEN: ${WHITELABEL_INTERNAL_TOKEN:-local-only-change-me-32-characters}
     ports:

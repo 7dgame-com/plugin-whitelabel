@@ -86,6 +86,23 @@ export default {
     editTitle: 'Edit agent domain JSON',
     searchPlaceholder: 'Search description or domain configuration key',
     loadFailed: 'Failed to load domain configurations',
+    importTitle: 'Select and import main-frontend JSON',
+    importOneTimeHint:
+      'This is a one-time copy: importing fully replaces the JSON below, and saving does not keep it synchronized with the main frontend.',
+    importSelectPlaceholder: 'Search main-frontend key or description',
+    importNoData: 'No main-frontend domain configuration is available',
+    importAction: 'Import into editor',
+    importMissingConfig: 'The API did not return copyable JSON',
+    importLoadFailed: 'Failed to load the main-frontend domain catalog',
+    importManualFallback: 'You can still edit and save JSON manually below.',
+    importSource: 'Source: {source}',
+    importMaterialized: 'Materialized during import: {values}',
+    importWarnings: 'Import notes:',
+    importConfirmTitle: 'Fully replace the current JSON?',
+    importConfirmMessage:
+      'The editor already has content. Importing does not merge fields; it fully replaces the current JSON. Continue?',
+    importConfirmButton: 'Replace and import',
+    importSuccess: 'Imported in full; review the JSON before saving',
     disableBeforeInactive:
       'This domain configuration is enabled. Disable it in the list before setting JSON is_active to false.',
   },

@@ -15,12 +15,18 @@
 | frontend | `APP_API_1_URL` | 现有主后端地址 |
 | frontend | `APP_BACKEND_1_URL` | 插件后端地址 |
 | backend | `MAIN_API_BASE_URL` | 现有主后端固定地址 |
+| backend | `MAIN_FRONTEND_PUBLIC_BASE_URL` | 可选；root 导入使用的主前端纯 origin |
+| backend | `DOMAIN_CATALOG_TIMEOUT_MS` | 可选；域名清单读取超时，默认 3000ms，最大 10000ms |
 | backend | `A1_PUBLIC_BASE_URL` | 二维码使用的 A1 公网 HTTPS origin |
 | backend | `DB_HOST` 等 | 插件数据库 |
 | backend | `WHITELABEL_INTERNAL_TOKEN` | A1 内部调用共享 secret |
 
 `WHITELABEL_INTERNAL_TOKEN` 必须由 Secret 管理器注入且至少 32 字符，不能写入镜像、
 仓库或任何白牌 JSON。
+
+直接运行后端时使用 `MAIN_FRONTEND_PUBLIC_BASE_URL`；仓库 Compose 通过
+`MAIN_FRONTEND_DOCKER_PUBLIC_BASE_URL` 把它传入容器。Docker 变量为空时会真正禁用
+目录导入，仅该辅助接口返回 503，其他功能不受影响。
 
 示例 Compose 为本地开发保留插件后端端口，以便独立运行的 A1 调用。生产部署应让
 A1 和插件后端通过受控内网服务发现互通，不向公网发布 `8093`；MySQL 也只在内部
@@ -48,7 +54,9 @@ A1 和插件后端通过受控内网服务发现互通，不向公网发布 `809
 `web/public/config/domains/{configKey}.json` 的命名语义，但两份数据是独立的：
 
 - 插件保存自己的完整 JSON 快照，供 Unity 解析；
-- 插件运行时不读取、不写入主前端静态文件，也不要求主前端可用；
+- 主前端构建在 `/config/domains/manifest.json` 发布按配置键排序的现有 JSON 清单；
+- root 可在插件中搜索清单并把一项完整复制进编辑器，保存后不再自动同步；
+- 插件运行时解析链路不读取、不写入主前端静态文件，也不要求主前端可用；
 - 主前端的匹配器会去掉 `d.` / `www.` 并逐级尝试父域名，因此
   `d.dev.xrugc.com` 可命中键 `dev.xrugc.com`；
 - 若新配置也要被主前端识别，必须在主前端仓库单独新增对应 JSON 并完成一次主前端
@@ -144,6 +152,8 @@ GitHub 仓库必须提供 `TENCENT_REGISTRY_USER` 和
 - admin 不能修改域名 JSON 或组合授权；
 - 域名表单只编辑 `StaticDomainConfig` JSON，`configKey` 来自 `config.name`，显示名
   来自 `config.description`，不再录入精确 hostname；
+- root 可以从主前端清单搜索配置键并一次性导入；目录不可用时仍可手工编辑，且
+  CRUD、A1 和 Unity 读取不受影响；
 - JSON 编辑器能格式化、压缩并实时报告语法/Schema 错误，校验失败不能提交；
 - 验证 `d.dev.xrugc.com` 等具体 host 与 `dev.xrugc.com` 配置键的域名族语义，不把
   host 错当成二维码索引；

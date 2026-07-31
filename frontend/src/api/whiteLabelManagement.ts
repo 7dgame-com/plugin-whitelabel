@@ -4,6 +4,8 @@ import type {
   AssignmentRecord,
   CreateDomainConfigInput,
   CreateOrganizationConfigInput,
+  DomainImportCatalog,
+  DomainImportCatalogItem,
   DomainConfigRecord,
   JsonObject,
   ListQuery,
@@ -13,6 +15,7 @@ import type {
   UpdateDomainConfigInput,
   UpdateOrganizationConfigInput,
 } from '../domain/types'
+import { validateJsonObjectValue } from '../domain/jsonObject'
 
 type UnknownRecord = Record<string, unknown>
 
@@ -102,6 +105,164 @@ export function normalizeDomainConfig(value: unknown): DomainConfigRecord {
     config: config as StaticDomainConfig,
     enabled: booleanValue(raw.enabled),
     ...timestamps(raw),
+  }
+}
+
+function catalogContractError(path: string, requirement: string): TypeError {
+  return new TypeError(
+    `Invalid domain import catalog: ${path} ${requirement}`,
+  )
+}
+
+function catalogRecord(value: unknown, path: string): UnknownRecord {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw catalogContractError(path, 'must be an object')
+  }
+  return value as UnknownRecord
+}
+
+function catalogString(value: unknown, path: string): string {
+  if (typeof value !== 'string') {
+    throw catalogContractError(path, 'must be a string')
+  }
+  return value
+}
+
+function catalogBoolean(value: unknown, path: string): boolean {
+  if (typeof value !== 'boolean') {
+    throw catalogContractError(path, 'must be a boolean')
+  }
+  return value
+}
+
+function catalogStringArray(value: unknown, path: string): string[] {
+  if (!Array.isArray(value)) {
+    throw catalogContractError(path, 'must be an array of strings')
+  }
+  const invalidIndex = value.findIndex((item) => typeof item !== 'string')
+  if (invalidIndex >= 0) {
+    throw catalogContractError(
+      `${path}[${invalidIndex}]`,
+      'must be a string',
+    )
+  }
+  return value as string[]
+}
+
+function hasOwn(record: UnknownRecord, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key)
+}
+
+function catalogDomainConfig(
+  value: unknown,
+  path: string,
+): StaticDomainConfig {
+  const result = validateJsonObjectValue<StaticDomainConfig>(value, 'domain')
+  if (!result.valid) {
+    const details = result.issues
+      .map((issue) => `${issue.path}: ${issue.message}`)
+      .join('; ')
+    throw catalogContractError(
+      path,
+      `must be a valid StaticDomainConfig (${details})`,
+    )
+  }
+  return result.value
+}
+
+export function normalizeDomainImportCatalogItem(
+  value: unknown,
+  path = 'item',
+): DomainImportCatalogItem {
+  const raw = catalogRecord(value, path)
+  const configKey = catalogString(raw.configKey, `${path}.configKey`)
+  const description = catalogString(
+    raw.description,
+    `${path}.description`,
+  )
+  const isActive = catalogBoolean(raw.isActive, `${path}.isActive`)
+  const importable = catalogBoolean(
+    raw.importable,
+    `${path}.importable`,
+  )
+  const materializedFrom = catalogStringArray(
+    raw.materializedFrom,
+    `${path}.materializedFrom`,
+  )
+  const warnings = catalogStringArray(raw.warnings, `${path}.warnings`)
+  const hasReason = hasOwn(raw, 'reason')
+  const reason = hasReason
+    ? catalogString(raw.reason, `${path}.reason`)
+    : undefined
+  const hasConfig = hasOwn(raw, 'config')
+  const config = hasConfig
+    ? catalogDomainConfig(raw.config, `${path}.config`)
+    : undefined
+
+  if (!importable && (!reason || reason.trim() === '')) {
+    throw catalogContractError(
+      `${path}.reason`,
+      'must be a non-empty string when importable is false',
+    )
+  }
+  if (importable && !config) {
+    throw catalogContractError(
+      `${path}.config`,
+      'is required when importable is true',
+    )
+  }
+  if (importable && config) {
+    if (config.name !== configKey) {
+      throw catalogContractError(
+        `${path}.config.name`,
+        'must exactly match configKey',
+      )
+    }
+    if (config.description !== description) {
+      throw catalogContractError(
+        `${path}.config.description`,
+        'must exactly match description',
+      )
+    }
+    if (config.is_active !== isActive) {
+      throw catalogContractError(
+        `${path}.config.is_active`,
+        'must exactly match isActive',
+      )
+    }
+  }
+
+  return {
+    configKey,
+    description,
+    isActive,
+    importable,
+    materializedFrom,
+    warnings,
+    ...(reason !== undefined ? { reason } : {}),
+    ...(config !== undefined ? { config } : {}),
+  }
+}
+
+export function normalizeDomainImportCatalog(
+  value: unknown,
+): DomainImportCatalog {
+  const raw = catalogRecord(unwrapData(value), 'catalog')
+  const source = catalogString(raw.source, 'catalog.source')
+  if (!Array.isArray(raw.items)) {
+    throw catalogContractError('catalog.items', 'must be an array')
+  }
+  if (raw.items.length === 0) {
+    throw catalogContractError(
+      'catalog.items',
+      'must contain at least one item',
+    )
+  }
+  return {
+    source,
+    items: raw.items.map((item, index) =>
+      normalizeDomainImportCatalogItem(item, `catalog.items[${index}]`),
+    ),
   }
 }
 
@@ -262,6 +423,11 @@ export async function listDomainConfigs(
     params: listParams(query),
   })
   return normalizePage(response.data, query, normalizeDomainConfig)
+}
+
+export async function getDomainImportCatalog(): Promise<DomainImportCatalog> {
+  const response = await backendApi.get('/domain-import-catalog')
+  return normalizeDomainImportCatalog(response.data)
 }
 
 export async function createDomainConfig(
