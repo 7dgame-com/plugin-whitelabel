@@ -1,0 +1,19 @@
+{
+  "id": "whitelabel",
+  "name": "白牌配置",
+  "name_i18n": {
+    "zh-CN": "白牌配置",
+    "zh-TW": "白牌設定",
+    "en-US": "White-label",
+    "ja-JP": "ホワイトラベル",
+    "th-TH": "ไวท์เลเบล"
+  },
+  "description": "分别管理购买方组织 JSON、代理方域名 JSON 及其 Unity 二维码组合",
+  "url": "http://localhost:3012/",
+  "icon": "Brush",
+  "enabled": 1,
+  "order": 30,
+  "access_scope": "admin-only",
+  "organization_name": null,
+  "version": "1.0.0"
+}

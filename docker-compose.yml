@@ -1,0 +1,67 @@
+# Local-development stack only. Production must use private service networking,
+# managed secrets, NODE_ENV=production, and must not publish backend or MySQL.
+services:
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${WHITELABEL_DB_ROOT_PASSWORD:-local-root-password}
+      MYSQL_DATABASE: ${WHITELABEL_DB_NAME:-whitelabel}
+      MYSQL_USER: ${WHITELABEL_DB_USER:-whitelabel}
+      MYSQL_PASSWORD: ${WHITELABEL_DB_PASSWORD:-local-whitelabel-password}
+    ports:
+      - "127.0.0.1:3337:3306"
+    volumes:
+      - whitelabel_db_data:/var/lib/mysql
+      - ./backend/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h 127.0.0.1 -u root -p$${MYSQL_ROOT_PASSWORD}",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: 8093
+      NODE_ENV: ${NODE_ENV:-development}
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_NAME: ${WHITELABEL_DB_NAME:-whitelabel}
+      DB_USER: ${WHITELABEL_DB_USER:-whitelabel}
+      DB_PASSWORD: ${WHITELABEL_DB_PASSWORD:-local-whitelabel-password}
+      MAIN_API_BASE_URL: ${MAIN_API_DOCKER_BASE_URL:-http://host.docker.internal:8081}
+      A1_PUBLIC_BASE_URL: ${A1_PUBLIC_BASE_URL:-http://localhost:8888}
+      WHITELABEL_INTERNAL_TOKEN: ${WHITELABEL_INTERNAL_TOKEN:-local-only-change-me-32-characters}
+    ports:
+      - "127.0.0.1:8093:8093"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+    environment:
+      APP_API_1_URL: ${MAIN_API_DOCKER_BASE_URL:-http://host.docker.internal:8081}
+      APP_BACKEND_1_URL: http://backend:8093
+    ports:
+      - "127.0.0.1:3012:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - backend
+
+volumes:
+  whitelabel_db_data:

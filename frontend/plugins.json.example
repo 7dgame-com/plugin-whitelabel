@@ -1,0 +1,18 @@
+{
+  "id": "whitelabel",
+  "name": "白牌配置",
+  "nameI18n": {
+    "zh-CN": "白牌配置",
+    "zh-TW": "白牌設定",
+    "en-US": "White-label Configuration"
+  },
+  "description": "独立管理购买方组织、代理方域名及其授权组合",
+  "url": "https://whitelabel.plugins.example.com/",
+  "icon": "Brush",
+  "group": "management",
+  "enabled": true,
+  "order": 30,
+  "accessScope": "admin-only",
+  "allowedOrigin": "https://whitelabel.plugins.example.com",
+  "version": "1.0.0"
+}

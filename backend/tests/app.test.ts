@@ -1,0 +1,514 @@
+import request from 'supertest';
+import { describe, expect, it, vi } from 'vitest';
+import { createApp } from '../src/app';
+import type {
+  Assignment,
+  AuthenticatedSession,
+  DomainConfig,
+  OrganizationDirectory,
+  OrganizationConfig,
+  ResolvedWhiteLabel,
+  SessionVerifier,
+  WhiteLabelRepository,
+} from '../src/types';
+import { organizationDirectoryFailure } from '../src/errors';
+
+const ORGANIZATION_ID = 12;
+const DOMAIN_ID = 34;
+const ASSIGNMENT_ID = 56;
+const INTERNAL_TOKEN = 'test-internal-token-that-is-long-enough';
+const A1_BASE_URL = new URL('https://a1.fixed.example');
+
+const audit = {
+  createdBy: '1',
+  updatedBy: '1',
+  statusChangedBy: '1',
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-02T00:00:00.000Z',
+  statusChangedAt: '2026-01-02T00:00:00.000Z',
+};
+
+function organization(
+  overrides: Partial<OrganizationConfig> = {},
+): OrganizationConfig {
+  return {
+    organizationId: ORGANIZATION_ID,
+    organizationName: 'acme',
+    organizationTitle: 'Acme Academy',
+    schemaVersion: 1,
+    revision: 4,
+    config: { branding: { primaryColor: '#123456' } },
+    enabled: true,
+    ...audit,
+    ...overrides,
+  };
+}
+
+function domain(overrides: Partial<DomainConfig> = {}): DomainConfig {
+  return {
+    domainId: DOMAIN_ID,
+    domain: 'ar.acme.example',
+    displayName: 'Acme AR',
+    schemaVersion: 2,
+    revision: 3,
+    config: { endpoints: { supportUrl: 'https://support.acme.example' } },
+    enabled: true,
+    ...audit,
+    ...overrides,
+  };
+}
+
+function assignment(overrides: Partial<Assignment> = {}): Assignment {
+  return {
+    assignmentId: ASSIGNMENT_ID,
+    organizationId: ORGANIZATION_ID,
+    domainId: DOMAIN_ID,
+    revision: 7,
+    enabled: true,
+    organization: {
+      name: 'acme',
+      title: 'Acme Academy',
+      enabled: true,
+    },
+    domain: {
+      host: 'ar.acme.example',
+      displayName: 'Acme AR',
+      enabled: true,
+    },
+    ...audit,
+    ...overrides,
+  };
+}
+
+function resolved(): ResolvedWhiteLabel {
+  return {
+    assignmentRevision: 7,
+    organization: {
+      id: ORGANIZATION_ID,
+      name: 'acme',
+      title: 'Acme Academy',
+      revision: 4,
+      schemaVersion: 1,
+      config: { branding: { primaryColor: '#123456' } },
+    },
+    domain: {
+      id: DOMAIN_ID,
+      host: 'ar.acme.example',
+      revision: 3,
+      schemaVersion: 2,
+      config: { endpoints: { supportUrl: 'https://support.acme.example' } },
+    },
+  };
+}
+
+function repository(overrides: Partial<WhiteLabelRepository> = {}): WhiteLabelRepository {
+  return {
+    health: vi.fn().mockResolvedValue(undefined),
+    listOrganizationConfigs: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+    createOrganizationConfig: vi.fn().mockResolvedValue(
+      organization({ revision: 1, enabled: false }),
+    ),
+    findOrganizationConfig: vi.fn().mockResolvedValue(organization()),
+    updateOrganizationConfig: vi.fn().mockResolvedValue({
+      kind: 'updated',
+      value: organization({ revision: 5 }),
+    }),
+    setOrganizationConfigEnabled: vi.fn().mockResolvedValue({
+      kind: 'updated',
+      value: organization({ revision: 5 }),
+    }),
+    listDomainConfigs: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+    createDomainConfig: vi.fn().mockResolvedValue(domain({ revision: 1, enabled: false })),
+    findDomainConfig: vi.fn().mockResolvedValue(domain()),
+    updateDomainConfig: vi.fn().mockResolvedValue({
+      kind: 'updated',
+      value: domain({ revision: 4 }),
+    }),
+    setDomainConfigEnabled: vi.fn().mockResolvedValue({
+      kind: 'updated',
+      value: domain({ revision: 4 }),
+    }),
+    listAssignments: vi.fn().mockResolvedValue({ items: [assignment()], total: 1 }),
+    createAssignment: vi.fn().mockResolvedValue(
+      assignment({ revision: 1, enabled: false }),
+    ),
+    findAssignment: vi.fn().mockResolvedValue(assignment()),
+    setAssignmentEnabled: vi.fn().mockResolvedValue({
+      kind: 'updated',
+      value: assignment({ revision: 8 }),
+    }),
+    resolveEnabledAssignment: vi.fn().mockResolvedValue(resolved()),
+    ...overrides,
+  };
+}
+
+function verifier(session: AuthenticatedSession): SessionVerifier {
+  return { verify: vi.fn().mockResolvedValue(session) };
+}
+
+function directory(
+  overrides: Partial<OrganizationDirectory> = {},
+): OrganizationDirectory {
+  return {
+    findById: vi.fn().mockResolvedValue({
+      id: ORGANIZATION_ID,
+      name: 'authoritative-acme',
+      title: 'Authoritative Acme Academy',
+    }),
+    ...overrides,
+  };
+}
+
+function adminSession(): AuthenticatedSession {
+  return {
+    userId: '8',
+    roles: ['admin'],
+    organizations: [
+      { id: ORGANIZATION_ID, name: 'acme', title: 'Acme Academy' },
+      { id: 13, name: 'second', title: 'Second Academy' },
+    ],
+  };
+}
+
+function rootSession(): AuthenticatedSession {
+  return { userId: '1', roles: ['root'], organizations: [] };
+}
+
+function app(
+  repo: WhiteLabelRepository,
+  session: AuthenticatedSession = rootSession(),
+  organizationDirectory: OrganizationDirectory = directory(),
+) {
+  return createApp({
+    repository: repo,
+    sessionVerifier: verifier(session),
+    organizationDirectory,
+    internalApiToken: INTERNAL_TOKEN,
+    a1PublicBaseUrl: A1_BASE_URL,
+  });
+}
+
+describe('three-layer white-label backend', () => {
+  it('reports database readiness', async () => {
+    const response = await request(app(repository())).get('/health');
+    expect(response.status).toBe(200);
+    expect(response.body.status).toBe('ok');
+  });
+
+  it('rejects authenticated users without root or admin', async () => {
+    const response = await request(app(repository(), {
+      userId: '9',
+      roles: ['user'],
+      organizations: [{ id: ORGANIZATION_ID, name: 'acme', title: 'Acme' }],
+    }))
+      .get('/api/v1/organization-configs')
+      .set('Authorization', 'Bearer session-token');
+    expect(response.status).toBe(403);
+  });
+
+  it('SQL-scopes admin organization access and writes the verified snapshot', async () => {
+    const repo = repository();
+    const service = app(repo, adminSession());
+
+    await request(service)
+      .get('/api/v1/organization-configs?page=2&pageSize=10&q=acme')
+      .set('Authorization', 'Bearer session-token')
+      .expect(200);
+    expect(repo.listOrganizationConfigs).toHaveBeenCalledWith(
+      [ORGANIZATION_ID, 13],
+      { q: 'acme', limit: 10, offset: 10 },
+    );
+
+    await request(service)
+      .post('/api/v1/organization-configs')
+      .set('Authorization', 'Bearer session-token')
+      .send({
+        organizationId: ORGANIZATION_ID,
+        config: { branding: { primaryColor: '#123456' } },
+      })
+      .expect(201);
+    expect(repo.createOrganizationConfig).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION_ID,
+      organizationName: 'acme',
+      organizationTitle: 'Acme Academy',
+      schemaVersion: 1,
+      config: { branding: { primaryColor: '#123456' } },
+    }, '8');
+  });
+
+  it('prevents admin from writing another organization', async () => {
+    const repo = repository();
+    const response = await request(app(repo, adminSession()))
+      .post('/api/v1/organization-configs')
+      .set('Authorization', 'Bearer session-token')
+      .send({
+        organizationId: 999,
+        config: {},
+      });
+    expect(response.status).toBe(403);
+    expect(repo.createOrganizationConfig).not.toHaveBeenCalled();
+  });
+
+  it('rejects client-supplied organization snapshot fields', async () => {
+    const repo = repository();
+    const response = await request(app(repo, adminSession()))
+      .post('/api/v1/organization-configs')
+      .set('Authorization', 'Bearer session-token')
+      .send({
+        organizationId: ORGANIZATION_ID,
+        organizationTitle: 'Forged title',
+        config: {},
+      });
+    expect(response.status).toBe(422);
+    expect(repo.createOrganizationConfig).not.toHaveBeenCalled();
+  });
+
+  it('uses the authoritative main-platform snapshot for root organization updates', async () => {
+    const repo = repository();
+    const organizationDirectory = directory();
+    const response = await request(app(repo, rootSession(), organizationDirectory))
+      .put(`/api/v1/organization-configs/${ORGANIZATION_ID}`)
+      .set('Authorization', 'Bearer session-token')
+      .send({
+        revision: 4,
+        schemaVersion: 2,
+        config: { features: { classroom: true } },
+    });
+    expect(response.status).toBe(200);
+    expect(organizationDirectory.findById).toHaveBeenCalledWith(
+      'Bearer session-token',
+      ORGANIZATION_ID,
+    );
+    expect(repo.updateOrganizationConfig).toHaveBeenCalledWith(
+      null,
+      ORGANIZATION_ID,
+      {
+        organizationName: 'authoritative-acme',
+        organizationTitle: 'Authoritative Acme Academy',
+        revision: 4,
+        schemaVersion: 2,
+        config: { features: { classroom: true } },
+      },
+      '1',
+    );
+  });
+
+  it('rejects a root organization id missing from the main platform', async () => {
+    const repo = repository();
+    const organizationDirectory = directory({ findById: vi.fn().mockResolvedValue(null) });
+    const response = await request(app(repo, rootSession(), organizationDirectory))
+      .post('/api/v1/organization-configs')
+      .set('Authorization', 'Bearer session-token')
+      .send({
+        organizationId: 999,
+        config: {},
+      });
+    expect(response.status).toBe(422);
+    expect(response.body.error.code).toBe('ORGANIZATION_NOT_FOUND');
+    expect(repo.createOrganizationConfig).not.toHaveBeenCalled();
+  });
+
+  it('fails root writes closed when the organization directory is unavailable', async () => {
+    const repo = repository();
+    const organizationDirectory = directory({
+      findById: vi.fn().mockRejectedValue(organizationDirectoryFailure()),
+    });
+    const response = await request(app(repo, rootSession(), organizationDirectory))
+      .post('/api/v1/organization-configs')
+      .set('Authorization', 'Bearer session-token')
+      .send({ organizationId: ORGANIZATION_ID, config: {} });
+    expect(response.status).toBe(502);
+    expect(response.body.error.code).toBe('ORGANIZATION_DIRECTORY_ERROR');
+    expect(repo.createOrganizationConfig).not.toHaveBeenCalled();
+  });
+
+  it('revalidates the main-platform organization before root enables it', async () => {
+    const repo = repository();
+    const organizationDirectory = directory({
+      findById: vi.fn().mockResolvedValue(null),
+    });
+    const response = await request(app(repo, rootSession(), organizationDirectory))
+      .post(`/api/v1/organization-configs/${ORGANIZATION_ID}/enable`)
+      .set('Authorization', 'Bearer session-token')
+      .send({ revision: 4 });
+    expect(response.status).toBe(422);
+    expect(response.body.error.code).toBe('ORGANIZATION_NOT_FOUND');
+    expect(repo.setOrganizationConfigEnabled).not.toHaveBeenCalled();
+  });
+
+  it('makes domain management root-only and validates domain JSON secrets', async () => {
+    const repo = repository();
+    await request(app(repo, adminSession()))
+      .get('/api/v1/domain-configs')
+      .set('Authorization', 'Bearer session-token')
+      .expect(403);
+    expect(repo.listDomainConfigs).not.toHaveBeenCalled();
+
+    const invalid = await request(app(repo))
+      .post('/api/v1/domain-configs')
+      .set('Authorization', 'Bearer session-token')
+      .send({
+        domain: 'AR.ACME.EXAMPLE',
+        displayName: 'Acme AR',
+        config: { nested: { secrets: { key: 'must-not-be-stored' } } },
+      });
+    expect(invalid.status).toBe(422);
+    expect(repo.createDomainConfig).not.toHaveBeenCalled();
+  });
+
+  it('creates numeric domain and assignment resources disabled by default', async () => {
+    const repo = repository();
+    const service = app(repo);
+
+    const domainResponse = await request(service)
+      .post('/api/v1/domain-configs')
+      .set('Authorization', 'Bearer session-token')
+      .send({
+        domain: 'AR.ACME.EXAMPLE',
+        displayName: 'Acme AR',
+        config: { publicEndpoint: 'https://api.acme.example' },
+      });
+    expect(domainResponse.status).toBe(201);
+    expect(domainResponse.body.data).toMatchObject({
+      domainId: DOMAIN_ID,
+      enabled: false,
+    });
+    expect(repo.createDomainConfig).toHaveBeenCalledWith({
+      domain: 'ar.acme.example',
+      displayName: 'Acme AR',
+      schemaVersion: 1,
+      config: { publicEndpoint: 'https://api.acme.example' },
+    }, '1');
+
+    const assignmentResponse = await request(service)
+      .post('/api/v1/assignments')
+      .set('Authorization', 'Bearer session-token')
+      .send({ organizationId: ORGANIZATION_ID, domainId: DOMAIN_ID });
+    expect(assignmentResponse.status).toBe(201);
+    expect(assignmentResponse.body.data).toMatchObject({
+      assignmentId: ASSIGNMENT_ID,
+      organizationId: ORGANIZATION_ID,
+      domainId: DOMAIN_ID,
+      enabled: false,
+    });
+    expect(repo.createAssignment).toHaveBeenCalledWith(
+      ORGANIZATION_ID,
+      DOMAIN_ID,
+      '1',
+    );
+  });
+
+  it('lets admin read only scoped assignments and never derives QR URL from the request', async () => {
+    const repo = repository();
+    const response = await request(app(repo, adminSession()))
+      .get('/api/v1/assignments')
+      .set('Authorization', 'Bearer session-token')
+      .set('Host', 'evil.example')
+      .set('X-Forwarded-Host', 'evil.example');
+
+    expect(response.status).toBe(200);
+    expect(repo.listAssignments).toHaveBeenCalledWith(
+      [ORGANIZATION_ID, 13],
+      { limit: 20, offset: 0 },
+    );
+    expect(response.body.data.items[0].assignmentId).toBe(ASSIGNMENT_ID);
+    expect(response.body.data.items[0]).toMatchObject({
+      createdBy: '1',
+      updatedBy: '1',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-02T00:00:00.000Z',
+      organization: {
+        name: 'acme',
+        title: 'Acme Academy',
+        enabled: true,
+      },
+      domain: {
+        host: 'ar.acme.example',
+        displayName: 'Acme AR',
+        enabled: true,
+      },
+    });
+    expect(response.body.data.items[0].qrUrl).toBe(
+      'https://a1.fixed.example/v1/white-label-configs?o=12&d=34',
+    );
+  });
+
+  it('prevents admin from creating or changing assignments', async () => {
+    const repo = repository();
+    const service = app(repo, adminSession());
+
+    await request(service)
+      .post('/api/v1/assignments')
+      .set('Authorization', 'Bearer session-token')
+      .send({ organizationId: ORGANIZATION_ID, domainId: DOMAIN_ID })
+      .expect(403);
+    await request(service)
+      .post(`/api/v1/assignments/${ASSIGNMENT_ID}/enable`)
+      .set('Authorization', 'Bearer session-token')
+      .send({ revision: 7 })
+      .expect(403);
+    expect(repo.createAssignment).not.toHaveBeenCalled();
+    expect(repo.setAssignmentEnabled).not.toHaveBeenCalled();
+  });
+
+  it('returns current revision on optimistic-lock conflict', async () => {
+    const repo = repository({
+      setAssignmentEnabled: vi.fn().mockResolvedValue({
+        kind: 'revision_conflict',
+        currentRevision: 9,
+      }),
+    });
+    const response = await request(app(repo))
+      .post(`/api/v1/assignments/${ASSIGNMENT_ID}/enable`)
+      .set('Authorization', 'Bearer session-token')
+      .send({ revision: 7 });
+    expect(response.status).toBe(409);
+    expect(response.body.error).toMatchObject({
+      code: 'REVISION_CONFLICT',
+      details: { currentRevision: 9 },
+    });
+  });
+
+  it('requires internal token and gives every invalid combination the same 404', async () => {
+    const repo = repository({ resolveEnabledAssignment: vi.fn().mockResolvedValue(null) });
+    const service = app(repo);
+
+    await request(service)
+      .get(`/internal/v1/white-label-configs/resolve?o=${ORGANIZATION_ID}&d=${DOMAIN_ID}`)
+      .expect(401);
+    const missing = await request(service)
+      .get(`/internal/v1/white-label-configs/resolve?o=${ORGANIZATION_ID}&d=${DOMAIN_ID}`)
+      .set('X-Internal-Token', INTERNAL_TOKEN);
+    const invalid = await request(service)
+      .get('/internal/v1/white-label-configs/resolve?o=0&d=bad')
+      .set('X-Internal-Token', INTERNAL_TOKEN);
+    expect(missing.status).toBe(404);
+    expect(invalid.status).toBe(404);
+    expect(invalid.body).toEqual(missing.body);
+  });
+
+  it('returns the two independent configs directly and supports ETag revalidation', async () => {
+    const service = app(repository());
+    const path = `/internal/v1/white-label-configs/resolve?o=${ORGANIZATION_ID}&d=${DOMAIN_ID}`;
+    const first = await request(service)
+      .get(path)
+      .set('X-Internal-Token', INTERNAL_TOKEN);
+
+    expect(first.status).toBe(200);
+    expect(first.headers.etag).toBe('"wl-o12-r4-d34-r3-a7"');
+    expect(first.headers['cache-control']).toBe('private, max-age=60');
+    expect(first.body).toEqual({
+      version: 1,
+      organization: resolved().organization,
+      domain: resolved().domain,
+    });
+
+    const cached = await request(service)
+      .get(path)
+      .set('X-Internal-Token', INTERNAL_TOKEN)
+      .set('If-None-Match', first.headers.etag);
+    expect(cached.status).toBe(304);
+    expect(cached.text).toBe('');
+  });
+
+});

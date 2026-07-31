@@ -1,0 +1,23 @@
+{
+  "id": "whitelabel",
+  "schemaVersion": "1",
+  "nameI18n": {
+    "zh-CN": "白牌配置",
+    "zh-TW": "白牌設定",
+    "en-US": "White-label Configuration"
+  },
+  "descriptionI18n": {
+    "zh-CN": "独立管理购买方组织、代理方域名及其授权组合",
+    "zh-TW": "獨立管理購買方組織、代理方網域及其授權組合",
+    "en-US": "Manage buyer organizations, agent domains, and authorized assignments"
+  },
+  "group": {
+    "id": "management",
+    "nameI18n": {
+      "zh-CN": "管理",
+      "zh-TW": "管理",
+      "en-US": "Management"
+    }
+  },
+  "accessScope": "admin-only"
+}

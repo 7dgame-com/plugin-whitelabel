@@ -1,0 +1,16 @@
+{
+  "name": "plugin-whitelabel-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "pnpm@10.12.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter ./backend --filter ./frontend dev",
+    "build": "pnpm -r --if-present build",
+    "type-check": "pnpm -r --if-present type-check",
+    "test": "pnpm -r --if-present test",
+    "check": "pnpm type-check && pnpm test && pnpm build"
+  }
+}
