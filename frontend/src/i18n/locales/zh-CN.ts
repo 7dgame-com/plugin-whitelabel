@@ -132,8 +132,8 @@ export default {
   qr: {
     title: 'Unity 白牌配置二维码',
     hint:
-      '二维码内容是后端返回的完整 yii3-a1 HTTPS GET URL；前端不会自行拼接或请求 A1。',
-    value: '完整 A1 URL',
+      '二维码内容是插件后端返回的完整公开 HTTPS GET URL；前端不会自行拼接。',
+    value: '完整公开 URL',
     unavailable: '二维码暂不可用',
     unavailableHint:
       '只有已启用且已授权的组合，才能显示后端返回的合法 HTTPS 二维码 URL。',

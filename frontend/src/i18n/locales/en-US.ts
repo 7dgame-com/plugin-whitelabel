@@ -137,8 +137,8 @@ export default {
   qr: {
     title: 'Unity white-label configuration QR',
     hint:
-      'The QR value is the complete yii3-a1 HTTPS GET URL returned by the backend. The frontend neither constructs nor calls A1.',
-    value: 'Complete A1 URL',
+      'The QR value is the complete public HTTPS GET URL returned by the plugin backend. The frontend never constructs it.',
+    value: 'Complete public URL',
     unavailable: 'QR code unavailable',
     unavailableHint:
       'Only enabled, authorized assignments can expose a valid backend-provided HTTPS QR URL.',

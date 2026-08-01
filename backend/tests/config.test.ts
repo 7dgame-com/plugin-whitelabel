@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildA1PublicBaseUrl,
+  buildWhiteLabelPublicBaseUrl,
   buildDomainCatalogManifestUrl,
   loadConfig,
 } from '../src/config';
@@ -12,37 +12,36 @@ const requiredEnvironment: NodeJS.ProcessEnv = {
   DB_USER: 'whitelabel',
   DB_PASSWORD: 'password',
   MAIN_API_BASE_URL: 'https://api.example.com',
-  A1_PUBLIC_BASE_URL: 'https://a1.example.com',
-  WHITELABEL_INTERNAL_TOKEN: 'internal-token-that-is-at-least-32-characters',
+  WHITELABEL_PUBLIC_BASE_URL: 'https://whitelabel.example.com',
 };
 
-describe('A1 public base URL', () => {
+describe('white-label public base URL', () => {
   it('requires HTTPS in production', () => {
     expect(() =>
-      buildA1PublicBaseUrl('http://a1.example.com', 'production'),
+      buildWhiteLabelPublicBaseUrl('http://whitelabel.example.com', 'production'),
     ).toThrow(/HTTPS/);
     expect(
-      buildA1PublicBaseUrl('https://a1.example.com', 'production').origin,
-    ).toBe('https://a1.example.com');
+      buildWhiteLabelPublicBaseUrl('https://whitelabel.example.com', 'production').origin,
+    ).toBe('https://whitelabel.example.com');
   });
 
   it('allows plain HTTP only for loopback development origins', () => {
     expect(
-      buildA1PublicBaseUrl('http://localhost:8888', 'development').origin,
-    ).toBe('http://localhost:8888');
+      buildWhiteLabelPublicBaseUrl('http://localhost:8093', 'development').origin,
+    ).toBe('http://localhost:8093');
     expect(() =>
-      buildA1PublicBaseUrl('http://a1.internal:8888', 'development'),
+      buildWhiteLabelPublicBaseUrl('http://whitelabel.internal:8093', 'development'),
     ).toThrow(/loopback/);
   });
 
   it('rejects paths, credentials, queries, and fragments', () => {
     for (const value of [
       'https://user@example.com',
-      'https://a1.example.com/base',
-      'https://a1.example.com?x=1',
-      'https://a1.example.com#fragment',
+      'https://whitelabel.example.com/base',
+      'https://whitelabel.example.com?x=1',
+      'https://whitelabel.example.com#fragment',
     ]) {
-      expect(() => buildA1PublicBaseUrl(value, 'production')).toThrow();
+      expect(() => buildWhiteLabelPublicBaseUrl(value, 'production')).toThrow();
     }
   });
 });

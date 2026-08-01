@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildA1PublicBaseUrl, buildVerifyTokenUrl } from '../src/config';
+import { buildVerifyTokenUrl, buildWhiteLabelPublicBaseUrl } from '../src/config';
 import { MainApiSessionVerifier } from '../src/sessionVerifier';
 
 describe('MainApiSessionVerifier', () => {
@@ -100,14 +100,22 @@ describe('MainApiSessionVerifier', () => {
   });
 });
 
-describe('A1 public base URL', () => {
+describe('white-label public base URL', () => {
   it('allows HTTP only outside production and accepts only a pure origin', () => {
-    expect(buildA1PublicBaseUrl('http://localhost:8888', 'development').toString())
-      .toBe('http://localhost:8888/');
-    expect(() => buildA1PublicBaseUrl('https://a1.example.test/gateway', 'development'))
+    expect(buildWhiteLabelPublicBaseUrl('http://localhost:8093', 'development').toString())
+      .toBe('http://localhost:8093/');
+    expect(() => buildWhiteLabelPublicBaseUrl(
+      'https://whitelabel.example.test/gateway',
+      'development',
+    ))
       .toThrow(/pure/);
-    expect(() => buildA1PublicBaseUrl('http://a1.example.test', 'production')).toThrow(/HTTPS/);
-    expect(buildA1PublicBaseUrl('https://a1.example.test/', 'production').toString())
-      .toBe('https://a1.example.test/');
+    expect(() => buildWhiteLabelPublicBaseUrl(
+      'http://whitelabel.example.test',
+      'production',
+    )).toThrow(/HTTPS/);
+    expect(buildWhiteLabelPublicBaseUrl(
+      'https://whitelabel.example.test/',
+      'production',
+    ).toString()).toBe('https://whitelabel.example.test/');
   });
 });

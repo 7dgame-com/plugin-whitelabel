@@ -19,8 +19,7 @@ const environmentSchema = z
     MAIN_API_TIMEOUT_MS: z.coerce.number().int().min(250).max(30_000).default(5_000),
     MAIN_FRONTEND_PUBLIC_BASE_URL: optionalUrlString,
     DOMAIN_CATALOG_TIMEOUT_MS: z.coerce.number().int().min(250).max(10_000).default(3_000),
-    A1_PUBLIC_BASE_URL: z.string().url(),
-    WHITELABEL_INTERNAL_TOKEN: z.string().min(32),
+    WHITELABEL_PUBLIC_BASE_URL: z.string().url(),
   })
   .passthrough();
 
@@ -40,8 +39,7 @@ export interface AppConfig {
   mainApiTimeoutMs: number;
   domainCatalogManifestUrl: URL | null;
   domainCatalogTimeoutMs: number;
-  a1PublicBaseUrl: URL;
-  internalApiToken: string;
+  publicBaseUrl: URL;
 }
 
 export function buildVerifyTokenUrl(baseUrl: string): URL {
@@ -70,7 +68,7 @@ export function buildOrganizationListUrl(baseUrl: string): URL {
   return new URL('v1/organization/list', parsed);
 }
 
-export function buildA1PublicBaseUrl(
+export function buildWhiteLabelPublicBaseUrl(
   baseUrl: string,
   nodeEnv: AppConfig['nodeEnv'],
 ): URL {
@@ -84,17 +82,17 @@ export function buildA1PublicBaseUrl(
     || parsed.pathname !== '/'
   ) {
     throw new Error(
-      'A1_PUBLIC_BASE_URL must be a pure http(s) origin without credentials, path, query, or fragment',
+      'WHITELABEL_PUBLIC_BASE_URL must be a pure http(s) origin without credentials, path, query, or fragment',
     );
   }
   if (nodeEnv === 'production' && parsed.protocol !== 'https:') {
-    throw new Error('A1_PUBLIC_BASE_URL must use HTTPS in production');
+    throw new Error('WHITELABEL_PUBLIC_BASE_URL must use HTTPS in production');
   }
   if (
     parsed.protocol === 'http:'
     && !['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)
   ) {
-    throw new Error('Plain HTTP A1_PUBLIC_BASE_URL is allowed only for a loopback host');
+    throw new Error('Plain HTTP WHITELABEL_PUBLIC_BASE_URL is allowed only for a loopback host');
   }
   return parsed;
 }
@@ -145,7 +143,9 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
         parsed.NODE_ENV,
       ),
     domainCatalogTimeoutMs: parsed.DOMAIN_CATALOG_TIMEOUT_MS,
-    a1PublicBaseUrl: buildA1PublicBaseUrl(parsed.A1_PUBLIC_BASE_URL, parsed.NODE_ENV),
-    internalApiToken: parsed.WHITELABEL_INTERNAL_TOKEN,
+    publicBaseUrl: buildWhiteLabelPublicBaseUrl(
+      parsed.WHITELABEL_PUBLIC_BASE_URL,
+      parsed.NODE_ENV,
+    ),
   };
 }

@@ -1,4 +1,3 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
 import express, {
   type ErrorRequestHandler,
   type NextFunction,
@@ -49,8 +48,7 @@ export interface AppDependencies {
   repository: WhiteLabelRepository;
   sessionVerifier: SessionVerifier;
   organizationDirectory: OrganizationDirectory;
-  internalApiToken: string;
-  a1PublicBaseUrl: URL;
+  publicBaseUrl: URL;
   domainImportCatalog?: DomainImportCatalog;
 }
 
@@ -188,7 +186,7 @@ function assignmentResponse(baseUrl: URL, assignment: Assignment) {
   };
 }
 
-function internalResponse(resolved: ResolvedWhiteLabel) {
+function publicResponse(resolved: ResolvedWhiteLabel) {
   return {
     version: 1,
     organization: resolved.organization,
@@ -196,7 +194,7 @@ function internalResponse(resolved: ResolvedWhiteLabel) {
   };
 }
 
-function internalEtag(resolved: ResolvedWhiteLabel): string {
+function publicEtag(resolved: ResolvedWhiteLabel): string {
   return `"wl-o${resolved.organization.id}-r${resolved.organization.revision}-d${resolved.domain.id}-r${resolved.domain.revision}-a${resolved.assignmentRevision}"`;
 }
 
@@ -211,38 +209,21 @@ function ifNoneMatchMatches(request: Request, etag: string): boolean {
   });
 }
 
-function sendInternalConfig(
+function sendPublicConfig(
   request: Request,
   response: Response,
   resolved: ResolvedWhiteLabel,
 ): void {
-  const etag = internalEtag(resolved);
+  const etag = publicEtag(resolved);
   response.set({
-    'Cache-Control': 'private, max-age=60',
+    'Cache-Control': 'public, max-age=60, stale-while-revalidate=300',
     ETag: etag,
-    Vary: 'X-Internal-Token',
   });
   if (ifNoneMatchMatches(request, etag)) {
     response.status(304).end();
     return;
   }
-  response.json(internalResponse(resolved));
-}
-
-function tokenDigest(value: string): Buffer {
-  return createHash('sha256').update(value, 'utf8').digest();
-}
-
-function createInternalAuth(expectedToken: string): RequestHandler {
-  const expectedDigest = tokenDigest(expectedToken);
-  return (request, _response, next) => {
-    const token = request.headers['x-internal-token'];
-    if (typeof token !== 'string' || !timingSafeEqual(tokenDigest(token), expectedDigest)) {
-      next(unauthorized('A valid internal service token is required'));
-      return;
-    }
-    next();
-  };
+  response.json(publicResponse(resolved));
 }
 
 function createManagementAuth(sessionVerifier: SessionVerifier): RequestHandler {
@@ -478,7 +459,7 @@ function createDomainImportCatalogRouter(
 
 function createAssignmentRouter(
   repository: WhiteLabelRepository,
-  a1PublicBaseUrl: URL,
+  publicBaseUrl: URL,
 ): express.Router {
   const router = express.Router();
 
@@ -487,7 +468,7 @@ function createAssignmentRouter(
     const context = managementContext(response);
     const result = await repository.listAssignments(context.scope, listOptions(query));
     response.json(listResponse(
-      result.items.map((assignment) => assignmentResponse(a1PublicBaseUrl, assignment)),
+      result.items.map((assignment) => assignmentResponse(publicBaseUrl, assignment)),
       result.total,
       query.page,
       query.pageSize,
@@ -505,7 +486,7 @@ function createAssignmentRouter(
     response
       .status(201)
       .location(`/api/v1/assignments/${created.assignmentId}`)
-      .json({ code: 0, data: assignmentResponse(a1PublicBaseUrl, created) });
+      .json({ code: 0, data: assignmentResponse(publicBaseUrl, created) });
   }));
 
   const statusHandler = (enabled: boolean): RequestHandler =>
@@ -521,7 +502,7 @@ function createAssignmentRouter(
       );
       response.json({
         code: 0,
-        data: assignmentResponse(a1PublicBaseUrl, mutationValue(result)),
+        data: assignmentResponse(publicBaseUrl, mutationValue(result)),
       });
     });
 
@@ -530,10 +511,10 @@ function createAssignmentRouter(
   return router;
 }
 
-function createInternalRouter(repository: WhiteLabelRepository): express.Router {
+function createPublicResolverRouter(repository: WhiteLabelRepository): express.Router {
   const router = express.Router();
 
-  router.get('/resolve', asyncHandler(async (request, response) => {
+  router.get('/', asyncHandler(async (request, response) => {
     const query = resolveQuerySchema.safeParse(request.query);
     if (!query.success) {
       throw notFound();
@@ -542,7 +523,7 @@ function createInternalRouter(repository: WhiteLabelRepository): express.Router 
     if (!resolved || !resolved.domain.config.is_active) {
       throw notFound();
     }
-    sendInternalConfig(request, response, resolved);
+    sendPublicConfig(request, response, resolved);
   }));
 
   return router;
@@ -617,12 +598,11 @@ export function createApp(dependencies: AppDependencies): express.Express {
   app.use(
     '/api/v1/assignments',
     managementAuth,
-    createAssignmentRouter(dependencies.repository, dependencies.a1PublicBaseUrl),
+    createAssignmentRouter(dependencies.repository, dependencies.publicBaseUrl),
   );
   app.use(
-    '/internal/v1/white-label-configs',
-    createInternalAuth(dependencies.internalApiToken),
-    createInternalRouter(dependencies.repository),
+    '/v1/white-label-configs',
+    createPublicResolverRouter(dependencies.repository),
   );
 
   app.use((_request, _response, next) =>

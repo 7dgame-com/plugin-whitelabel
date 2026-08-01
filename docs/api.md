@@ -148,7 +148,7 @@ Unity 解析链路均不受影响。单个条目不符合插件 Schema 时只禁
 前端文件。导入是完整的一次性复制，不是合并或同步。如果同一个新键也要在主前端
 生效，需要在主前端仓库单独增加
 `web/public/config/domains/{configKey}.json` 并发布。
-`fallback_domain` 只作为格式兼容元数据返回，插件、A1 和 Unity 不沿它递归读取其他
+`fallback_domain` 只作为格式兼容元数据返回，插件和 Unity 不沿它递归读取其他
 文件。提交给插件的快照必须已经包含 Unity 所需的有效内容；外部 fallback 且
 `default_config`、`configs` 都为空的纯引用文档会被拒绝。
 
@@ -179,7 +179,7 @@ POST /api/v1/assignments/{assignmentId}/disable
 - admin 只查看自己当前所属组织的组合；
 - admin 不得创建或启停组合。
 
-组合响应包含由后端固定 `A1_PUBLIC_BASE_URL` 生成的 `qrUrl`：
+组合响应包含由后端固定 `WHITELABEL_PUBLIC_BASE_URL` 生成的 `qrUrl`：
 
 ```json
 {
@@ -204,7 +204,7 @@ POST /api/v1/assignments/{assignmentId}/disable
   "createdAt": "2026-07-31T08:00:00.000Z",
   "updatedAt": "2026-07-31T08:05:00.000Z",
   "statusChangedAt": "2026-07-31T08:05:00.000Z",
-  "qrUrl": "https://a1.example.com/v1/white-label-configs?o=42&d=8"
+  "qrUrl": "https://whitelabel.example.com/v1/white-label-configs?o=42&d=8"
 }
 ```
 
@@ -212,17 +212,16 @@ POST /api/v1/assignments/{assignmentId}/disable
 前端只有在组合、`organization.enabled` 和 `domain.enabled` 三层同时为 true 时才
 显示可用二维码。
 
-## 5. 插件内部解析 API
+## 5. Unity 公开解析 API
 
-仅 `yii3-a1` 可调用：
+任何扫描到二维码的客户端都可调用：
 
 ```http
-GET /internal/v1/white-label-configs/resolve?o=42&d=8
-X-Internal-Token: <shared-secret>
+GET /v1/white-label-configs?o=42&d=8
 If-None-Match: "wl-o42-r3-d8-r5-a2"
 ```
 
-成功响应不使用 `code/data` 包装，A1 可以原样转发：
+成功响应不使用 `code/data` 包装，Unity 分别读取两份配置：
 
 ```json
 {
@@ -256,20 +255,10 @@ If-None-Match: "wl-o42-r3-d8-r5-a2"
 
 ```http
 ETag: "wl-o42-r3-d8-r5-a2"
-Cache-Control: private, max-age=60
+Cache-Control: public, max-age=60, stale-while-revalidate=300
 ```
 
 任一配置或组合不存在、停用以及 ID 非法均返回相同 404。
 
-## 6. Unity / yii3-a1 公开 API
-
-> 当前状态：以下 `yii3-a1` 白牌路由是待接入契约，尚未部署。二维码格式已经确定，
-> 但在 A1 实现并发布前不能形成可访问的完整链路。本设计不使用 `yii3-a3`。
-
-```http
-GET /v1/white-label-configs?o=42&d=8
-If-None-Match: "wl-o42-r3-d8-r5-a2"
-```
-
-A1 严格校验两个参数为正整数，然后调用固定的插件内部地址。它不访问插件数据库，
-不转发客户端 Authorization，也不复制白牌权限和组合逻辑。
+该接口直接由白牌插件后端处理，不经过 `yii3-a1` 或主后端。它只接受两个正整数，
+不接受客户端提供的数据库地址、上游 URL、hostname 配置键或授权范围。

@@ -7,8 +7,8 @@
 - **域名 JSON**：代理产品的代理方配置，是与主前端 `StaticDomainConfig` 同结构的
   独立快照；
 - **组合授权**：只声明某个组织可以搭配某个域名，不保存或合并 JSON；
-- **HTTPS 二维码**：目标协议是把二维码做成 `yii3-a1` 的只读 REST 地址，Unity
-  扫描后直接 `GET` 获取两份独立 JSON。
+- **HTTPS 二维码**：二维码是白牌插件公开只读 REST 地址，Unity 扫描后直接 `GET`
+  获取两份独立 JSON。
 
 这里的“域名”不是某一个精确 hostname，而是主前端静态域名配置的
 `configKey` / 域名族。例如请求域名 `d.dev.xrugc.com` 会命中配置键
@@ -32,17 +32,13 @@ plugin-whitelabel backend
        └─ white_label_assignment
 
 二维码 HTTPS URL
-  └─ yii3-a1 /v1/white-label-configs?o={organizationId}&d={domainId}
-       └─ 内网调用 plugin backend /internal/v1/white-label-configs/resolve
+  └─ plugin-whitelabel backend /v1/white-label-configs?o={organizationId}&d={domainId}
+       └─ 直接读取插件 MySQL 中已启用的组织、域名与组合
 ```
 
 主前端只在构建时汇总已有公开域名 JSON，不新增白牌数据表或运行时业务；主后端也
-不新增白牌业务代码或数据表，只继续作为身份与组织权威源。`yii3-a1` 只承担公开、
-只读的 Unity 网关。
-
-> **当前状态：** `yii3-a1` 的白牌路由仍是接口草案，尚未部署。因此当前二维码
-> URL 代表最终协议，不能把它当作已经可用的线上接口；本项目不存在
-> `yii3-a3`。
+不新增白牌业务代码或数据表，只继续作为管理身份与组织权威源。Unity 读取链路不
+经过主前端、主后端或 `yii3-a1`。
 
 ## 域名配置键与主前端的关系
 
@@ -50,11 +46,11 @@ plugin-whitelabel backend
   `dev.xrugc.com`；`config.description` 用作显示名称；
 - 主前端构建会把 `web/public/config/domains/*.json` 汇总为公开只读的
   `/config/domains/manifest.json`；root 可以在域名弹窗中搜索并一次性导入；
-- 导入会完整替换编辑器内容，保存后成为插件自己的快照，不会自动同步。Unity、A1
+- 导入会完整替换编辑器内容，保存后成为插件自己的快照，不会自动同步。Unity
   和插件解析接口不读取 manifest，因此主前端停机不会影响已经保存的配置；
 - 快照必须已经包含 Unity 所需的有效内容。导入工具会从同一份 manifest 有界解析
   外部 fallback，并分别补齐缺失的默认配置和语言配置；`fallback_domain` 仍只作为
-  格式元数据保存，插件解析接口、A1 和 Unity 都不会在运行时递归抓取；
+  格式元数据保存，插件解析接口和 Unity 都不会在运行时递归抓取；
 - 主前端现有匹配规则会去掉 `d.` / `www.` 并逐级尝试父域名，所以
   `d.dev.xrugc.com` 可以命中 `dev.xrugc.com`；
 - 如果同一配置也要被主前端识别，必须另行新增并发布
@@ -104,10 +100,7 @@ pnpm dev
 | 插件后端 | `http://localhost:8093` |
 | 插件 MySQL | `localhost:3337` |
 | 主后端（外部依赖） | `http://localhost:8081` |
-| yii3-a1（外部依赖） | `http://localhost:8888` |
-
-`yii3-a1` 地址是待接入的外部依赖；在白牌路由完成并部署前，本地或开发环境中的
-二维码解析不会形成完整闭环。
+| Unity 公开读取接口 | `http://localhost:8093/v1/white-label-configs` |
 
 ## 主前端注册
 

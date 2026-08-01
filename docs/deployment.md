@@ -5,7 +5,7 @@
 部署：
 
 - `frontend`：Vue 静态应用；
-- `backend`：管理 API 和 A1 内部解析 API；
+- `backend`：管理 API 和 Unity 公开只读解析 API；
 - `db`：插件独立 MySQL database/schema，可与其他服务复用同一 MySQL 实例。
 
 关键环境变量：
@@ -17,22 +17,16 @@
 | backend | `MAIN_API_BASE_URL` | 现有主后端固定地址 |
 | backend | `MAIN_FRONTEND_PUBLIC_BASE_URL` | 可选；root 导入使用的主前端纯 origin |
 | backend | `DOMAIN_CATALOG_TIMEOUT_MS` | 可选；域名清单读取超时，默认 3000ms，最大 10000ms |
-| backend | `A1_PUBLIC_BASE_URL` | 二维码使用的 A1 公网 HTTPS origin |
+| backend | `WHITELABEL_PUBLIC_BASE_URL` | 二维码使用的插件公网 HTTPS origin |
 | backend | `DB_HOST` 等 | 插件数据库 |
-| backend | `WHITELABEL_INTERNAL_TOKEN` | A1 内部调用共享 secret |
-
-`WHITELABEL_INTERNAL_TOKEN` 必须由 Secret 管理器注入且至少 32 字符，不能写入镜像、
-仓库或任何白牌 JSON。
 
 直接运行后端时使用 `MAIN_FRONTEND_PUBLIC_BASE_URL`；仓库 Compose 通过
 `MAIN_FRONTEND_DOCKER_PUBLIC_BASE_URL` 把它传入容器。Docker 变量为空时会真正禁用
 目录导入，仅该辅助接口返回 503，其他功能不受影响。
 
-示例 Compose 为本地开发保留插件后端端口，以便独立运行的 A1 调用。生产部署应让
-A1 和插件后端通过受控内网服务发现互通，不向公网发布 `8093`；MySQL 也只在内部
-网络暴露。仓库 Compose 是本地开发配置，端口只绑定 loopback，不能直接用于生产。
-前端 nginx 和 Vite 只代理 `/backend/api/*`，其他 `/backend/*` 路径全部拒绝，
-浏览器无法到达内部解析接口。
+示例 Compose 只把后端端口绑定 loopback，不能直接用于生产。部署代理应只把精确的
+`GET /v1/white-label-configs` 路径转发到插件后端，并对该路径配置限流；管理接口继续
+通过前端同源代理访问。MySQL 永远只在内部网络暴露，不能发布 3306。
 
 ## 2. 主前端注册
 
@@ -69,35 +63,25 @@ A1 和插件后端通过受控内网服务发现互通，不向公网发布 `809
 - `GET /v1/plugin/verify-token`：角色和多个组织 ID；
 - 现有组织列表：root 配置界面的组织选择。
 
-主后端故障时管理请求失败关闭，但 Unity → A1 → 插件内部 API 的读取链路不经过主
+主后端故障时管理请求失败关闭，但 Unity → 插件公开只读 API 的读取链路不经过主
 后端。
 
-## 4. yii3-a1（待接入）
+## 4. Unity 公开读取
 
-以下是部署目标，不是当前已上线状态。`yii3-a1` 的白牌路由目前仍是草案且尚未
-部署；A1 未发布前，插件展示的二维码不能完成 Unity 公开读取闭环。
-
-A1 配置：
+插件后端配置自己的公开 origin：
 
 ```env
-WHITELABEL_SERVICE_URL=http://whitelabel-backend:8093
-WHITELABEL_INTERNAL_TOKEN=<与插件后端一致的 secret>
+WHITELABEL_PUBLIC_BASE_URL=https://whitelabel.example.com
 ```
 
-A1 公开：
+部署代理公开：
 
 ```http
 GET /v1/white-label-configs?o={organizationId}&d={domainId}
 ```
 
-A1 只读调用：
-
-```http
-GET /internal/v1/white-label-configs/resolve?o={organizationId}&d={domainId}
-X-Internal-Token: <secret>
-```
-
-不存在 `yii3-a3` 接入。
+`yii3-a1`、主后端和主前端均不参与该读取链路。数字 ID 是公开定位符；真正的返回
+条件是组织配置、域名配置和组合授权三层都启用。
 
 ## 5. 数据初始化
 
@@ -153,20 +137,20 @@ GitHub 仓库必须提供 `TENCENT_REGISTRY_USER` 和
 - 域名表单只编辑 `StaticDomainConfig` JSON，`configKey` 来自 `config.name`，显示名
   来自 `config.description`，不再录入精确 hostname；
 - root 可以从主前端清单搜索配置键并一次性导入；目录不可用时仍可手工编辑，且
-  CRUD、A1 和 Unity 读取不受影响；
+  CRUD 和 Unity 读取不受影响；
 - JSON 编辑器能格式化、压缩并实时报告语法/Schema 错误，校验失败不能提交；
 - 验证 `d.dev.xrugc.com` 等具体 host 与 `dev.xrugc.com` 配置键的域名族语义，不把
   host 错当成二维码索引；
 - user / manager 无法进入插件且管理 API 返回 403；
 - 新组织、新域名和新组合都默认停用；
-- 只有三层都启用的组合可由 A1 返回；
+- 只有三层都启用的组合可由公开解析接口返回；
 - 任一缺失或停用统一 404；
 - ETag 命中返回 304；
 - 主后端不可用时不放行管理写操作；
-- 插件后端不可用时 A1 返回 503；
-- A1 白牌路由确已实现和部署后，才把二维码标记为完整可用；
+- 插件后端不可用时 Unity 回退 last-known-good；
+- 部署代理只向插件后端转发公开解析路径，管理路径不能被绕过；
 - 两份 JSON 均不存在 token、password、secret、privateKey 等字段；
-- 生产二维码 URL 使用 HTTPS 且来自固定 `A1_PUBLIC_BASE_URL`。
+- 生产二维码 URL 使用 HTTPS 且来自固定 `WHITELABEL_PUBLIC_BASE_URL`。
 
 当前 develop 数据库已确认没有历史域名记录，因此本次语义切换不需要 DDL 或回填。
 在进入 main/publish 前仍必须重新审计目标库；若存在旧版任意 JSON 行，应先停用并

@@ -7,7 +7,7 @@
 1. **业务身份正确**：组织代表账号购买方，域名配置键/域名族代表产品代理方；
 2. **配置完全分离**：双方各自维护一份 JSON，不复制、不合并、不覆盖；
 3. **权限边界明确**：admin 只管理当前会话所属组织，root 管理代理域名和组合；
-4. **低耦合**：主前端和主后端不承载白牌业务，A1 只做只读网关；
+4. **低耦合**：主前端、主后端和 `yii3-a1` 都不承载白牌运行时业务；
 5. **失败安全**：任何一侧或组合无效时都不返回半份配置。
 
 “域名”不是浏览器本次请求的精确 hostname。它是与主前端静态配置文件名一致的
@@ -24,9 +24,8 @@ flowchart LR
     API -.->|"仅 root 导入时 GET 公开 domain manifest"| Host
     API -->|"verify-token"| Main["现有主后端"]
     API --> DB[("插件独立 MySQL")]
-    UI -->|"显示 HTTPS QR"| QR["A1 URL: ?o=组织ID&d=域名ID"]
-    Unity["Unity"] -->|"扫描并 GET"| A1["yii3-a1 只读网关"]
-    A1 -->|"固定内网 URL + X-Internal-Token"| API
+    UI -->|"显示 HTTPS QR"| QR["插件公开 URL: ?o=组织ID&d=域名ID"]
+    Unity["Unity"] -->|"扫描并 GET"| API
 ```
 
 ### 主前端
@@ -54,23 +53,17 @@ flowchart LR
 - 不信任前端提交的角色、用户 ID 或组织权限；
 - 两份 JSON 的字段名限制为可审计的 ASCII 标识符，并递归拒绝认证、token、密码、
   私钥和连接串等敏感字段；
-- 向 A1 暴露固定 token 保护的内部只读解析接口。
+- 向 Unity 暴露唯一的公开只读解析接口；它只接受两个正整数 ID，没有写操作；
 - 可从部署时固定的主前端 HTTPS origin 读取 root-only 导入清单；浏览器不能指定
   URL，清单不可用也不会影响健康检查、CRUD 或 Unity 解析；
 - 域名配置以完整 `StaticDomainConfig` JSON 独立存储，`config.name` 派生
   `configKey`，`config.description` 派生只读显示名；不保存当前访问 host。
 
-### yii3-a1（待接入）
+### yii3-a1
 
-- 公开 `GET /v1/white-label-configs?o={organizationId}&d={domainId}`；
-- 只接受两个正整数 ID；
-- 内部服务地址来自部署环境变量，不从二维码 host 或请求参数构造；
-- 只转发允许的 JSON、ETag 和 Cache-Control；
-- 404 原样归一，其余上游异常返回不泄漏细节的 503。
-
-以上是目标接口契约。当前 `yii3-a1` 白牌路由仍是草案且尚未部署，不能把二维码 URL
-描述为已经可访问的线上能力。不存在也不创建 `yii3-a3`；最终公开读取入口使用
-`yii3-a1`。
+- 不参与白牌读取链路；
+- 不连接插件数据库，也不保存白牌配置或共享令牌；
+- 白牌插件独立完成公开读取、缓存和三层启用校验。
 
 ## 3. 权限模型
 
@@ -204,7 +197,7 @@ Unity 分别解析 `organization.config` 和 `domain.config`。两份 JSON 都�
   `fallback_domain` 为 string 或 null，`default_config` 为 object，`configs` 是
   语言到 object 的映射；
 - 域名快照必须自包含。`fallback_domain` 是格式兼容元数据，不是 Unity 读取链路；
-  插件、A1 和 Unity 不按它递归请求其他配置，纯外部 fallback 且自身内容为空的文档
+  插件和 Unity 不按它递归请求其他配置，纯外部 fallback 且自身内容为空的文档
   会被拒绝。导入这类主前端文件时必须先物化所需有效内容；
 - 管理界面中的共享 JSON 编辑器提供语法高亮、行号、格式化、压缩、语法诊断和
   Schema 诊断。任一校验失败时禁止提交。
@@ -219,7 +212,7 @@ JSON。需要让 root 动态编辑 Schema 时应另做有审计、版本迁移�
 ## 6. 失败与缓存
 
 - 任一 ID 非法、记录不存在、任一配置停用或组合停用：统一 404；
-- 插件后端不可用或响应契约错误：A1 返回 503；
+- 插件后端不可用：Unity 按网络错误回退 last-known-good；
 - ETag 同时包含组合、组织和域名 revision；
 - If-None-Match 命中返回 304；
 - Unity 成功后保存 last-known-good；

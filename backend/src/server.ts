@@ -59,8 +59,7 @@ const app = createApp({
   repository,
   sessionVerifier,
   organizationDirectory,
-  internalApiToken: config.internalApiToken,
-  a1PublicBaseUrl: config.a1PublicBaseUrl,
+  publicBaseUrl: config.publicBaseUrl,
   domainImportCatalog,
 });
 

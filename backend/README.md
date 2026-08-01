@@ -8,8 +8,8 @@ This service owns three independently versioned resources:
 - an organization/domain assignment with publish state but no JSON.
 
 The service has no dependency on the main platform database. It validates the
-main-platform session on every management request and exposes one token-protected
-read-only resolve endpoint intended for `yii3-a1`.
+main-platform session on every management request and exposes one public,
+read-only resolve endpoint for Unity QR lookups.
 
 The domain resource does not represent one exact request hostname. Its
 `configKey` is derived from `config.name` and identifies the same domain family
@@ -40,8 +40,9 @@ main frontend remains a separate change and deployment.
 - A domain `configKey` is globally unique, follows the static domain-config key
   grammar, and must exactly match `config.name`. It is never derived from an HTTP
   Host header. `displayName` is a read-only projection of `config.description`.
-- Internal resolve requires `X-Internal-Token`. Missing, invalid, disabled, or
-  partially disabled combinations all return the same `404`.
+- The public resolver accepts only positive organization/domain IDs. Missing,
+  invalid, disabled, or partially disabled combinations all return the same
+  `404`; IDs are public locators rather than authorization credentials.
 - Organization and domain JSON reject secret-bearing field names and are
   size/depth constrained, including nested variants such as `clientSecret`,
   `dbPassword`, `signingKey`, `authorization`, `jwt`, and token-bearing keys.
@@ -49,7 +50,7 @@ main frontend remains a separate change and deployment.
   bypass this control.
 - There are no delete routes. Every update and enable/disable requires the current
   `revision`.
-- QR URLs use only fixed `A1_PUBLIC_BASE_URL`; request headers cannot alter them.
+- QR URLs use only fixed `WHITELABEL_PUBLIC_BASE_URL`; request headers cannot alter them.
   Production startup requires this URL to use HTTPS.
 - Domain imports use only the fixed `MAIN_FRONTEND_PUBLIC_BASE_URL` origin and
   `/config/domains/manifest.json`. The client cannot select a URL, redirects are
@@ -63,7 +64,7 @@ schema change on one resource never changes the other resource.
 
 Only `schemaVersion: 1` is implemented and accepted. A domain snapshot must be
 self-contained for Unity. `fallback_domain` is preserved as format-compatible
-metadata, but the plugin and A1 never dereference it at runtime; a pure external
+metadata, but the plugin never dereferences it at runtime; a pure external
 fallback document with empty `default_config` and `configs` is rejected.
 
 ## Management API
@@ -96,7 +97,7 @@ Assignments:
 
 New resources are always disabled. There is no hard-delete endpoint.
 Assignment responses include organization and domain display summaries for the UI
-and a `qrUrl` generated from the fixed A1 origin, while retaining full audit fields.
+and a `qrUrl` generated from the fixed plugin origin, while retaining full audit fields.
 
 Domain create input contains `configKey`, `schemaVersion`, and the full `config`
 snapshot; update additionally contains `revision`. Clients do not submit
@@ -117,11 +118,11 @@ snapshot; update additionally contains `revision`. Clients do not submit
 }
 ```
 
-## Internal API
+## Public Unity API
 
 ```http
-GET /internal/v1/white-label-configs/resolve?o=12&d=34
-X-Internal-Token: ...
+GET /v1/white-label-configs?o=12&d=34
+If-None-Match: "wl-o12-r4-d34-r2-a7"
 ```
 
 The endpoint returns data only when the assignment, organization config, and
@@ -158,10 +159,10 @@ domain config are all enabled:
 ETag incorporates assignment, organization, and domain revisions, so independent
 JSON updates correctly invalidate caches. `If-None-Match` returns `304`.
 
-The `yii3-a1` white-label route is currently a draft contract and has not been
-deployed. This repository defines the internal side of that integration, but a QR
-URL is not end-to-end usable until A1 implements and publishes the public route.
-There is no `yii3-a3` service in this design.
+The endpoint is intentionally public because QR data is public runtime branding.
+It has no write operations and never accepts a database address, hostname key,
+upstream URL, or authorization scope from the caller. Apply edge rate limiting
+at the deployment proxy.
 
 ## Run
 
@@ -173,12 +174,13 @@ There is no `yii3-a3` service in this design.
    @7dgame/plugin-whitelabel-backend build`, then `pnpm --filter
    @7dgame/plugin-whitelabel-backend start`.
 
-`A1_PUBLIC_BASE_URL` must be a pure origin such as `https://a1.example.com`;
+`WHITELABEL_PUBLIC_BASE_URL` must be a pure origin such as
+`https://whitelabel.example.com`;
 paths, queries, and fragments are rejected.
 
 `MAIN_FRONTEND_PUBLIC_BASE_URL` is optional and must also be a pure origin. If
 omitted or unavailable, only `GET /api/v1/domain-import-catalog` returns `503`;
-startup, health, CRUD, and internal resolution continue normally. Imported JSON
+startup, health, CRUD, and public resolution continue normally. Imported JSON
 is a snapshot and is never refreshed automatically. `DOMAIN_CATALOG_TIMEOUT_MS`
 defaults to 3000 and cannot exceed 10000.
 

@@ -18,8 +18,7 @@ import { organizationDirectoryFailure } from '../src/errors';
 const ORGANIZATION_ID = 12;
 const DOMAIN_ID = 34;
 const ASSIGNMENT_ID = 56;
-const INTERNAL_TOKEN = 'test-internal-token-that-is-long-enough';
-const A1_BASE_URL = new URL('https://a1.fixed.example');
+const PUBLIC_BASE_URL = new URL('https://whitelabel.fixed.example');
 
 const audit = {
   createdBy: '1',
@@ -207,8 +206,7 @@ function app(
     repository: repo,
     sessionVerifier: verifier(session),
     organizationDirectory,
-    internalApiToken: INTERNAL_TOKEN,
-    a1PublicBaseUrl: A1_BASE_URL,
+    publicBaseUrl: PUBLIC_BASE_URL,
     domainImportCatalog,
   });
 }
@@ -576,7 +574,7 @@ describe('three-layer white-label backend', () => {
       },
     });
     expect(response.body.data.items[0].qrUrl).toBe(
-      'https://a1.fixed.example/v1/white-label-configs?o=12&d=34',
+      'https://whitelabel.fixed.example/v1/white-label-configs?o=12&d=34',
     );
   });
 
@@ -616,22 +614,40 @@ describe('three-layer white-label backend', () => {
     });
   });
 
-  it('requires internal token and gives every invalid combination the same 404', async () => {
+  it('is public and gives every invalid combination the same 404', async () => {
     const repo = repository({ resolveEnabledAssignment: vi.fn().mockResolvedValue(null) });
     const service = app(repo);
 
     await request(service)
-      .get(`/internal/v1/white-label-configs/resolve?o=${ORGANIZATION_ID}&d=${DOMAIN_ID}`)
-      .expect(401);
+      .get(`/v1/white-label-configs?o=${ORGANIZATION_ID}&d=${DOMAIN_ID}`)
+      .expect(404);
     const missing = await request(service)
-      .get(`/internal/v1/white-label-configs/resolve?o=${ORGANIZATION_ID}&d=${DOMAIN_ID}`)
-      .set('X-Internal-Token', INTERNAL_TOKEN);
+      .get(`/v1/white-label-configs?o=${ORGANIZATION_ID}&d=${DOMAIN_ID}`);
     const invalid = await request(service)
-      .get('/internal/v1/white-label-configs/resolve?o=0&d=bad')
-      .set('X-Internal-Token', INTERNAL_TOKEN);
+      .get('/v1/white-label-configs?o=0&d=bad');
     expect(missing.status).toBe(404);
     expect(invalid.status).toBe(404);
     expect(invalid.body).toEqual(missing.body);
+  });
+
+  it('resolves without calling the main-platform session verifier', async () => {
+    const sessionVerifier: SessionVerifier = {
+      verify: vi.fn().mockRejectedValue(new Error('main platform unavailable')),
+    };
+    const service = createApp({
+      repository: repository(),
+      sessionVerifier,
+      organizationDirectory: directory(),
+      publicBaseUrl: PUBLIC_BASE_URL,
+    });
+
+    await request(service)
+      .get(`/v1/white-label-configs?o=${ORGANIZATION_ID}&d=${DOMAIN_ID}`)
+      .expect(200);
+    expect(sessionVerifier.verify).not.toHaveBeenCalled();
+    await request(service)
+      .get(`/internal/v1/white-label-configs/resolve?o=${ORGANIZATION_ID}&d=${DOMAIN_ID}`)
+      .expect(404);
   });
 
   it('never resolves a domain snapshot with is_active=false', async () => {
@@ -642,21 +658,21 @@ describe('three-layer white-label backend', () => {
     }));
 
     await request(service)
-      .get(`/internal/v1/white-label-configs/resolve?o=${ORGANIZATION_ID}&d=${DOMAIN_ID}`)
-      .set('X-Internal-Token', INTERNAL_TOKEN)
+      .get(`/v1/white-label-configs?o=${ORGANIZATION_ID}&d=${DOMAIN_ID}`)
       .expect(404);
   });
 
   it('returns the two independent configs directly and supports ETag revalidation', async () => {
     const service = app(repository());
-    const path = `/internal/v1/white-label-configs/resolve?o=${ORGANIZATION_ID}&d=${DOMAIN_ID}`;
-    const first = await request(service)
-      .get(path)
-      .set('X-Internal-Token', INTERNAL_TOKEN);
+    const path = `/v1/white-label-configs?o=${ORGANIZATION_ID}&d=${DOMAIN_ID}`;
+    const first = await request(service).get(path);
 
     expect(first.status).toBe(200);
     expect(first.headers.etag).toBe('"wl-o12-r4-d34-r3-a7"');
-    expect(first.headers['cache-control']).toBe('private, max-age=60');
+    expect(first.headers['cache-control']).toBe(
+      'public, max-age=60, stale-while-revalidate=300',
+    );
+    expect(first.headers.vary).toBeUndefined();
     expect(first.body).toEqual({
       version: 1,
       organization: resolved().organization,
@@ -665,7 +681,6 @@ describe('three-layer white-label backend', () => {
 
     const cached = await request(service)
       .get(path)
-      .set('X-Internal-Token', INTERNAL_TOKEN)
       .set('If-None-Match', first.headers.etag);
     expect(cached.status).toBe(304);
     expect(cached.text).toBe('');

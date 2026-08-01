@@ -57,7 +57,8 @@ pnpm --filter plugin-whitelabel-frontend dev
 | `/api/*` | `http://localhost:8081` | 主后端会话与组织列表 |
 | `/backend/api/*` | `http://localhost:8093` | 白牌插件管理 API |
 
-其他 `/backend/*` 路径不代理，避免浏览器访问 A1 专用的内部解析接口。
+其他 `/backend/*` 路径不代理。公开只读解析接口由部署层直接路由到插件后端，
+不经过管理前端。
 
 可分别用 `VITE_APP_API_URL` 和 `VITE_APP_BACKEND_URL` 覆盖。
 
@@ -119,19 +120,18 @@ pnpm --filter plugin-whitelabel-frontend dev
 
 ## 二维码
 
-组合接口在 `qrUrl` 中返回完整的 yii3-a1 HTTPS GET URL，例如：
+组合接口在 `qrUrl` 中返回完整的白牌插件 HTTPS GET URL，例如：
 
 ```text
-https://a1.example.com/v1/white-label-configs?o=42&d=8
+https://whitelabel.example.com/v1/white-label-configs?o=42&d=8
 ```
 
-前端只校验、显示和复制该原始值，不自行拼接 URL，也不直接请求 yii3-a1。
+前端只校验、显示和复制该原始值，不自行拼接或代替 Unity 请求该 URL。
 二维码只对已启用且当前用户有权查看的组合显示。
 本地开发唯一例外是 `http://localhost`、`http://127.0.0.1` 或 IPv6 loopback；
 非 loopback HTTP 地址仍会被拒绝。
 
-当前 `yii3-a1` 的白牌路由仍是草案且尚未部署；上述 URL 是已经确定的协议格式，
-不是对线上可用性的声明。本设计不存在 `yii3-a3`。
+该 URL 由插件后端从固定部署 origin 生成，直接指向插件自己的公开只读接口。
 
 ## Docker
 

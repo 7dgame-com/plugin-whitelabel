@@ -456,7 +456,7 @@ describe('three-resource management API contract', () => {
               domain: { enabled: true },
               revision: 2,
               qrUrl:
-                'https://a1.example.com/v1/white-label-configs?o=42&d=8',
+                'https://whitelabel.example.com/v1/white-label-configs?o=42&d=8',
             },
           ],
           total: 1,
@@ -468,7 +468,7 @@ describe('three-resource management API contract', () => {
 
     const result = await listAssignments()
     expect(result.items[0]?.qrUrl).toBe(
-      'https://a1.example.com/v1/white-label-configs?o=42&d=8',
+      'https://whitelabel.example.com/v1/white-label-configs?o=42&d=8',
     )
   })
 
@@ -492,7 +492,7 @@ describe('three-resource management API contract', () => {
         enabled: true,
         revision: 2,
         qrUrl:
-          'https://a1.example.com/v1/white-label-configs?o=42&d=8',
+          'https://whitelabel.example.com/v1/white-label-configs?o=42&d=8',
       }),
     ).toMatchObject({
       assignmentId: 11,
