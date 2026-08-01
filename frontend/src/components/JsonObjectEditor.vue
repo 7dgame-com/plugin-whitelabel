@@ -5,7 +5,7 @@
   >
     <div class="json-editor-toolbar">
       <span class="json-schema-label">{{ schemaLabel }}</span>
-      <div class="json-editor-actions">
+      <div v-if="!readOnly" class="json-editor-actions">
         <el-button
           size="small"
           text
@@ -63,14 +63,13 @@ import {
 import { useI18n } from 'vue-i18n'
 import {
   formatJsonObjectText,
-  type JsonSchemaKind,
   type JsonValidationIssue,
   validateJsonObjectText,
 } from '../domain/jsonObject'
 
 const props = defineProps<{
   modelValue: string
-  schema: JsonSchemaKind
+  readOnly?: boolean
   ariaLabel?: string
 }>()
 
@@ -86,7 +85,7 @@ let editorView: EditorView | null = null
 let syncingFromProps = false
 
 const validation = computed(() =>
-  validateJsonObjectText(props.modelValue, props.schema),
+  validateJsonObjectText(props.modelValue),
 )
 
 const canReformat = computed(
@@ -94,11 +93,7 @@ const canReformat = computed(
     formatJsonObjectText(props.modelValue, false) !== null,
 )
 
-const schemaLabel = computed(() =>
-  props.schema === 'domain'
-    ? t('common.jsonDomainSchema')
-    : t('common.jsonObjectSchema'),
-)
+const schemaLabel = computed(() => t('common.jsonDomainSchema'))
 
 const editorAriaLabel = computed(
   () => props.ariaLabel ?? String(schemaLabel.value),
@@ -202,7 +197,7 @@ function jsonLint(view: EditorView): Diagnostic[] {
   if (syntaxDiagnostics.length > 0) return syntaxDiagnostics
 
   const text = view.state.doc.toString()
-  const result = validateJsonObjectText(text, props.schema)
+  const result = validateJsonObjectText(text)
   if (result.valid) return []
 
   return result.issues.map((issue) => ({
@@ -245,10 +240,12 @@ onMounted(() => {
       basicSetup,
       json(),
       EditorView.lineWrapping,
+      EditorView.editable.of(!props.readOnly),
       EditorView.contentAttributes.of({
         'aria-label': editorAriaLabel.value,
         'aria-describedby': statusId,
         'aria-invalid': String(!validation.value.valid),
+        'aria-readonly': String(Boolean(props.readOnly)),
         autocapitalize: 'off',
         autocomplete: 'off',
         spellcheck: 'false',

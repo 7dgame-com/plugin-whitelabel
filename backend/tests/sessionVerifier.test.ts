@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildVerifyTokenUrl, buildWhiteLabelPublicBaseUrl } from '../src/config';
+import { buildVerifyTokenUrl } from '../src/config';
 import { MainApiSessionVerifier } from '../src/sessionVerifier';
 
 describe('MainApiSessionVerifier', () => {
-  it('retains organization id/name/title and verifies through the fixed upstream', async () => {
+  it('retains only identity and roles and verifies through the fixed upstream', async () => {
     const payload = Buffer.from(JSON.stringify({
       iss: 'https://tenant.acme.example:8443/api',
     })).toString('base64url');
@@ -35,10 +35,6 @@ describe('MainApiSessionVerifier', () => {
     expect(session).toEqual({
       userId: '42',
       roles: ['admin', 'user'],
-      organizations: [
-        { id: 12, name: 'acme', title: 'Acme Academy' },
-        { id: 13, name: 'second', title: 'second' },
-      ],
     });
     expect(fetchMock.mock.calls[0]?.[0].toString()).toBe(
       'https://main.example.test/api/v1/plugin/verify-token',
@@ -98,24 +94,29 @@ describe('MainApiSessionVerifier', () => {
       code: 'AUTH_UPSTREAM_ERROR',
     });
   });
-});
 
-describe('white-label public base URL', () => {
-  it('allows HTTP only outside production and accepts only a pure origin', () => {
-    expect(buildWhiteLabelPublicBaseUrl('http://localhost:8093', 'development').toString())
-      .toBe('http://localhost:8093/');
-    expect(() => buildWhiteLabelPublicBaseUrl(
-      'https://whitelabel.example.test/gateway',
-      'development',
-    ))
-      .toThrow(/pure/);
-    expect(() => buildWhiteLabelPublicBaseUrl(
-      'http://whitelabel.example.test',
-      'production',
-    )).toThrow(/HTTPS/);
-    expect(buildWhiteLabelPublicBaseUrl(
-      'https://whitelabel.example.test/',
-      'production',
-    ).toString()).toBe('https://whitelabel.example.test/');
+  it('ignores organization context, including malformed organization data', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        data: {
+          id: 1,
+          roles: ['root'],
+          organizations: 'not-used-by-white-label',
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    const verifier = new MainApiSessionVerifier(
+      buildVerifyTokenUrl('https://main.example.test'),
+      1_000,
+      fetchMock,
+    );
+
+    await expect(verifier.verify('Bearer token')).resolves.toEqual({
+      userId: '1',
+      roles: ['root'],
+    });
   });
 });

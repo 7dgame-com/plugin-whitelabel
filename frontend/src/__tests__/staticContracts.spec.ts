@@ -1,119 +1,101 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 function read(relativePath: string): string {
   return readFileSync(new URL(relativePath, import.meta.url), 'utf8')
 }
 
-describe('deployment contracts', () => {
-  it('registers the plugin as admin-only', () => {
+describe('domain-only deployment contracts', () => {
+  it('keeps the host route admin-only while describing a domain-only plugin', () => {
     const manifest = JSON.parse(
       read('../../public/plugin-manifest.json'),
     ) as Record<string, unknown>
     const registration = JSON.parse(
       read('../../plugins.json.example'),
     ) as Record<string, unknown>
-    const systemAdminRegistration = JSON.parse(
-      read('../../../system-admin-registration.example.json'),
-    ) as Record<string, unknown>
 
     expect(manifest.accessScope).toBe('admin-only')
     expect(registration.accessScope).toBe('admin-only')
-    expect(systemAdminRegistration.access_scope).toBe('admin-only')
-    expect(systemAdminRegistration.organization_name).toBeNull()
-    expect(systemAdminRegistration).not.toHaveProperty('accessScope')
+    expect(JSON.stringify(manifest.descriptionI18n)).toContain('域名')
+    expect(JSON.stringify(manifest.descriptionI18n)).not.toContain('组织')
+    expect(JSON.stringify(manifest.descriptionI18n)).not.toContain('二维码')
   })
 
-  it('proxies only the host API and plugin backend', () => {
+  it('proxies only the host session API and plugin management API', () => {
     const nginx = read('../../nginx.conf.template')
     expect(nginx).toContain('location /api/')
     expect(nginx).toContain('proxy_pass ${APP_API_1_URL}')
     expect(nginx).toContain('location ^~ /backend/api/')
     expect(nginx).toContain('location ^~ /backend/')
     expect(nginx).toContain('proxy_pass ${APP_BACKEND_1_URL}')
-    expect(nginx).not.toMatch(
-      /location \^~ \/backend\/ \{[\s\S]*?proxy_pass/,
-    )
+    expect(nginx).not.toMatch(/location \^~ \/backend\/ \{[\s\S]*?proxy_pass/)
   })
 
-  it('documents the separated reference-only model', () => {
+  it('documents only the access-domain to Unity JSON model', () => {
     const readme = read('../../README.md')
-    expect(readme).toContain('organizationId + domainId')
-    expect(readme).toContain('不复制、不拼接')
+    expect(readme).toContain('访问域名 → 配置键 → Unity 白牌 JSON')
+    expect(readme).not.toContain('organizationId')
+    expect(readme).not.toContain('assignment')
+    expect(readme).not.toContain('?o=')
   })
 
   it('pins all writes to the only supported schema version', () => {
-    const organizationPanel = read(
-      '../components/OrganizationConfigsPanel.vue',
-    )
     const domainPanel = read('../components/DomainConfigsPanel.vue')
 
-    expect(organizationPanel).not.toContain(
-      'schemaVersion: editing.value.schemaVersion',
-    )
     expect(domainPanel).not.toContain(
       'schemaVersion: editing.value.schemaVersion',
     )
-    expect(organizationPanel.match(/schemaVersion: 1/g)).toHaveLength(2)
     expect(domainPanel.match(/schemaVersion: 1/g)).toHaveLength(2)
   })
 
-  it('uses one schema-aware JSON editor for both independent configs', () => {
-    const organizationDialog = read(
-      '../components/OrganizationConfigDialog.vue',
-    )
+  it('uses one domain-schema JSON editor for Unity snapshots', () => {
     const domainDialog = read('../components/DomainConfigDialog.vue')
     const editor = read('../components/JsonObjectEditor.vue')
+    const schema = read('../domain/jsonObject.ts')
 
-    expect(organizationDialog).toContain('<JsonObjectEditor')
-    expect(organizationDialog).toContain('schema="organization"')
     expect(domainDialog).toContain('<JsonObjectEditor')
-    expect(domainDialog).toContain('schema="domain"')
     expect(domainDialog).toContain('configKey: config.name')
-    expect(domainDialog).toContain(
-      'props.record?.enabled && !config.is_active',
-    )
-    expect(domainDialog).not.toContain('hostnameValidationMessage')
+    expect(domainDialog).toContain(':read-only="readOnly"')
+    expect(domainDialog).toContain('props.record?.enabled && !config.is_active')
     expect(editor).toContain('basicSetup')
     expect(editor).toContain('jsonParseLinter')
     expect(editor).toContain('formatJsonObjectText')
-    expect(editor).toContain('syntaxHighlightTheme')
-    expect(editor).toContain('--json-syntax-string')
-    expect(editor).toContain("'aria-describedby': statusId")
+    expect(editor).toContain('EditorView.editable.of(!props.readOnly)')
+    expect(schema).toContain('const domainSchema')
+    expect(schema).not.toContain('organizationSchema')
   })
 
-  it('imports main-frontend domain JSON as an explicit one-time replacement', () => {
+  it('keeps import and all writes root-only while admins can view JSON', () => {
     const domainDialog = read('../components/DomainConfigDialog.vue')
-    const managementApi = read('../api/whiteLabelManagement.ts')
     const domainPanel = read('../components/DomainConfigsPanel.vue')
 
-    expect(managementApi).toContain(
-      "backendApi.get('/domain-import-catalog')",
-    )
-    expect(domainDialog).toContain('filterable')
-    expect(domainDialog).toContain(':disabled="!item.importable || !item.config"')
+    expect(domainDialog).toContain('v-if="!readOnly"')
     expect(domainDialog).toContain('ElMessageBox.confirm')
-    expect(domainDialog).toContain(
-      'form.json = JSON.stringify(item.config, null, 2)',
-    )
-    expect(domainDialog).toContain('selectedCatalogItem.materializedFrom')
-    expect(domainDialog).toContain('selectedCatalogItem.warnings')
-    expect(domainDialog).toContain("t('domain.importOneTimeHint')")
-    expect(domainDialog).not.toContain('Object.assign')
     expect(domainPanel).toContain('v-if="isRootUser"')
+    expect(domainPanel).toContain(':read-only="editorReadOnly"')
+    expect(domainPanel).toContain('editorReadOnly.value = !isRootUser.value')
+    expect(domainPanel).not.toContain('if (!isRootUser.value) return\n  loading')
   })
 
-  it('loads each workspace tab once and preserves it after switching away', () => {
+  it('renders one workspace without tabs or plugin-generated QR', () => {
     const workspace = read('../views/WhiteLabelWorkspace.vue')
+    const packageJson = read('../../package.json')
 
-    expect(workspace.match(/<el-tab-pane name="[^"]+" lazy>/g)).toHaveLength(
-      3,
-    )
-    expect(workspace).not.toContain('v-if="activeTab ===')
-    expect(workspace).toContain('v-if="user"')
-    expect(workspace).toContain(':key="sessionScopeKey"')
-    expect(workspace).toContain('<OrganizationConfigsPanel />')
     expect(workspace).toContain('<DomainConfigsPanel />')
-    expect(workspace).toContain('<AssignmentsPanel />')
+    expect(workspace).toContain('workspace.accessDomain')
+    expect(workspace).toContain('workspace.configKey')
+    expect(workspace).toContain('workspace.unityJson')
+    expect(workspace).not.toContain('<el-tabs')
+    expect(packageJson).not.toContain('qrcode.vue')
+    expect(
+      existsSync(new URL('../components/WhiteLabelQrDialog.vue', import.meta.url)),
+    ).toBe(false)
+  })
+
+  it('verifies only identity and roles from the host session', () => {
+    const session = read('../api/session.ts')
+    expect(session).toContain("mainApi.get('/plugin/verify-token')")
+    expect(session).not.toContain('/organization/list')
+    expect(session).not.toContain('payload?.organizations')
   })
 })

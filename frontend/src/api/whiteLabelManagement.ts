@@ -1,19 +1,14 @@
 import { backendApi } from './client'
 import type {
-  AssignmentInput,
-  AssignmentRecord,
   CreateDomainConfigInput,
-  CreateOrganizationConfigInput,
   DomainImportCatalog,
   DomainImportCatalogItem,
   DomainConfigRecord,
   JsonObject,
   ListQuery,
-  OrganizationConfigRecord,
   PagedResult,
   StaticDomainConfig,
   UpdateDomainConfigInput,
-  UpdateOrganizationConfigInput,
 } from '../domain/types'
 import { validateJsonObjectValue } from '../domain/jsonObject'
 
@@ -59,25 +54,6 @@ function timestamps(raw: UnknownRecord) {
   return {
     ...(createdAt ? { createdAt } : {}),
     ...(updatedAt ? { updatedAt } : {}),
-  }
-}
-
-export function normalizeOrganizationConfig(
-  value: unknown,
-): OrganizationConfigRecord {
-  const raw = asRecord(value)
-  return {
-    organizationId: numberValue(raw.organizationId),
-    organizationName: stringValue(raw.organizationName),
-    organizationTitle: stringValue(
-      raw.organizationTitle,
-      raw.organizationName,
-    ),
-    schemaVersion: numberValue(raw.schemaVersion),
-    revision: numberValue(raw.revision),
-    config: jsonObject(raw.config),
-    enabled: booleanValue(raw.enabled),
-    ...timestamps(raw),
   }
 }
 
@@ -157,7 +133,7 @@ function catalogDomainConfig(
   value: unknown,
   path: string,
 ): StaticDomainConfig {
-  const result = validateJsonObjectValue<StaticDomainConfig>(value, 'domain')
+  const result = validateJsonObjectValue<StaticDomainConfig>(value)
   if (!result.valid) {
     const details = result.issues
       .map((issue) => `${issue.path}: ${issue.message}`)
@@ -266,58 +242,6 @@ export function normalizeDomainImportCatalog(
   }
 }
 
-export function normalizeAssignment(value: unknown): AssignmentRecord {
-  const raw = asRecord(value)
-  const organization = asRecord(raw.organization)
-  const domain =
-    typeof raw.domain === 'object' ? asRecord(raw.domain) : {}
-
-  return {
-    assignmentId: numberValue(raw.assignmentId),
-    organizationId: numberValue(
-      raw.organizationId,
-      organization.organizationId,
-      organization.id,
-    ),
-    domainId: numberValue(raw.domainId, domain.domainId, domain.id),
-    revision: numberValue(raw.revision),
-    enabled: booleanValue(raw.enabled),
-    organizationEnabled: booleanValue(organization.enabled),
-    domainEnabled: booleanValue(domain.enabled),
-    qrUrl: stringValue(raw.qrUrl) || null,
-    organizationName: stringValue(
-      raw.organizationName,
-      organization.organizationName,
-      organization.name,
-    ),
-    organizationTitle: stringValue(
-      raw.organizationTitle,
-      organization.organizationTitle,
-      organization.title,
-      raw.organizationName,
-    ),
-    domainConfigKey: stringValue(
-      raw.domainConfigKey,
-      typeof raw.domain === 'string' ? raw.domain : undefined,
-      domain.configKey,
-      domain.domainConfigKey,
-      domain.domain,
-      domain.host,
-    ),
-    domainDescription: stringValue(
-      raw.domainDescription,
-      raw.domainDisplayName,
-      domain.description,
-      domain.domainDescription,
-      domain.displayName,
-      typeof raw.domain === 'string' ? raw.domain : undefined,
-      domain.configKey,
-      domain.domain,
-    ),
-    ...timestamps(raw),
-  }
-}
-
 function listParams(query: ListQuery): Record<string, unknown> {
   return {
     q: query.q || undefined,
@@ -364,56 +288,6 @@ async function setEnabled<T>(
     { revision },
   )
   return normalize(unwrapData(response.data))
-}
-
-export async function listOrganizationConfigs(
-  query: ListQuery = {},
-): Promise<PagedResult<OrganizationConfigRecord>> {
-  const response = await backendApi.get('/organization-configs', {
-    params: listParams(query),
-  })
-  return normalizePage(response.data, query, normalizeOrganizationConfig)
-}
-
-export async function createOrganizationConfig(
-  input: CreateOrganizationConfigInput,
-): Promise<OrganizationConfigRecord> {
-  const response = await backendApi.post('/organization-configs', input)
-  return normalizeOrganizationConfig(unwrapData(response.data))
-}
-
-export async function getOrganizationConfig(
-  organizationId: number,
-): Promise<OrganizationConfigRecord> {
-  const response = await backendApi.get(
-    `/organization-configs/${organizationId}`,
-  )
-  return normalizeOrganizationConfig(unwrapData(response.data))
-}
-
-export async function updateOrganizationConfig(
-  organizationId: number,
-  input: UpdateOrganizationConfigInput,
-): Promise<OrganizationConfigRecord> {
-  const response = await backendApi.put(
-    `/organization-configs/${organizationId}`,
-    input,
-  )
-  return normalizeOrganizationConfig(unwrapData(response.data))
-}
-
-export function setOrganizationConfigEnabled(
-  organizationId: number,
-  enabled: boolean,
-  revision: number,
-): Promise<OrganizationConfigRecord> {
-  return setEnabled(
-    'organization-configs',
-    organizationId,
-    enabled,
-    revision,
-    normalizeOrganizationConfig,
-  )
 }
 
 export async function listDomainConfigs(
@@ -463,35 +337,5 @@ export function setDomainConfigEnabled(
     enabled,
     revision,
     normalizeDomainConfig,
-  )
-}
-
-export async function listAssignments(
-  query: ListQuery = {},
-): Promise<PagedResult<AssignmentRecord>> {
-  const response = await backendApi.get('/assignments', {
-    params: listParams(query),
-  })
-  return normalizePage(response.data, query, normalizeAssignment)
-}
-
-export async function createAssignment(
-  input: AssignmentInput,
-): Promise<AssignmentRecord> {
-  const response = await backendApi.post('/assignments', input)
-  return normalizeAssignment(unwrapData(response.data))
-}
-
-export function setAssignmentEnabled(
-  assignmentId: number,
-  enabled: boolean,
-  revision: number,
-): Promise<AssignmentRecord> {
-  return setEnabled(
-    'assignments',
-    assignmentId,
-    enabled,
-    revision,
-    normalizeAssignment,
   )
 }

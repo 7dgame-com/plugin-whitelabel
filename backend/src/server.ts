@@ -5,7 +5,6 @@ import { createApp } from './app';
 import { loadConfig } from './config';
 import { MainFrontendDomainImportCatalog } from './domainImportCatalog';
 import { MysqlWhiteLabelRepository } from './mysqlRepository';
-import { MainApiOrganizationDirectory } from './organizationDirectory';
 import { MainApiSessionVerifier } from './sessionVerifier';
 
 if (process.env.NODE_ENV !== 'production') {
@@ -45,10 +44,6 @@ const sessionVerifier = new MainApiSessionVerifier(
   config.verifyTokenUrl,
   config.mainApiTimeoutMs,
 );
-const organizationDirectory = new MainApiOrganizationDirectory(
-  config.organizationListUrl,
-  config.mainApiTimeoutMs,
-);
 const domainImportCatalog = config.domainCatalogManifestUrl === null
   ? undefined
   : new MainFrontendDomainImportCatalog(
@@ -58,8 +53,6 @@ const domainImportCatalog = config.domainCatalogManifestUrl === null
 const app = createApp({
   repository,
   sessionVerifier,
-  organizationDirectory,
-  publicBaseUrl: config.publicBaseUrl,
   domainImportCatalog,
 });
 

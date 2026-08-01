@@ -1,220 +1,190 @@
 # 架构与权限
 
-## 1. 设计原则
+## 1. 决策
 
-本设计按以下顺序取舍：
+白牌配置只由当前主前端的完整 hostname 决定。组织不是白牌维度，也不是白牌授权
+条件。
 
-1. **业务身份正确**：组织代表账号购买方，域名配置键/域名族代表产品代理方；
-2. **配置完全分离**：双方各自维护一份 JSON，不复制、不合并、不覆盖；
-3. **权限边界明确**：admin 只管理当前会话所属组织，root 管理代理域名和组合；
-4. **低耦合**：主前端、主后端和 `yii3-a1` 都不承载白牌运行时业务；
-5. **失败安全**：任何一侧或组合无效时都不返回半份配置。
+设计优先级：
 
-“域名”不是浏览器本次请求的精确 hostname。它是与主前端静态配置文件名一致的
-`configKey`，代表一组可以命中同一配置的域名。例如主前端按候选域名逐级查找时，
-`d.dev.xrugc.com` 会命中 `dev.xrugc.com`。插件同时为每条记录分配自己的数字
-`domainId`，作为组合外键和二维码短索引。
+1. 同一个域名在任何账号登录后得到同一份白牌配置；
+2. 登录、账户组织和白牌解析分别拥有独立上下文；
+3. 主前端和主后端只传递必要的 hostname 与服务地址，不理解配置键匹配、JSON Schema
+   或白牌启停规则；
+4. 白牌插件自行管理快照、匹配、校验、缓存和审计；
+5. 对未知、非法或明确停用的域名失败关闭，避免套用错误品牌。
 
 ## 2. 组件关系
 
 ```mermaid
 flowchart LR
-    Host["主前端 / PluginSystem"] -->|"iframe + INIT token"| UI["插件前端"]
-    UI -->|"Bearer token"| API["插件后端"]
-    API -.->|"仅 root 导入时 GET 公开 domain manifest"| Host
-    API -->|"verify-token"| Main["现有主后端"]
-    API --> DB[("插件独立 MySQL")]
-    UI -->|"显示 HTTPS QR"| QR["插件公开 URL: ?o=组织ID&d=域名ID"]
-    Unity["Unity"] -->|"扫描并 GET"| API
+    Host["主前端 / PluginSystem"] -->|"iframe + INIT token"| UI["白牌管理前端"]
+    UI -->|"Bearer token"| API["白牌插件后端"]
+    API -->|"verify-token，仅管理鉴权"| Main["主后端"]
+    API -.->|"仅 root 导入时读取固定 manifest"| Host
+    API --> DB[("插件 MySQL：domain config")]
+
+    QR["既有登录二维码 web_loginKey"] --> Unity["Unity"]
+    Unity -->|"既有登录"| Login["既有登录系统"]
+    Unity -->|"按 loginKey 读取独立临时上下文"| Context["主后端 / Redis 上下文"]
+    Context -->|"frontendDomain + configurationUrl"| Unity
+    Unity -->|"GET ?domain=完整 hostname"| API
 ```
 
-### 主前端
+### 白牌插件
 
-- 只通过现有插件系统加载 iframe；
-- 继续使用 `PLUGIN_READY -> INIT`、token 更新、主题和语言协议；
-- 不新增白牌页面、业务路由或白牌状态；构建时只把已有公开域名 JSON 汇总为
-  `/config/domains/manifest.json`；
-- `web/src/api/domain-static-config.ts` 及 `web/public/config/domains/*.json` 仍是
-  数据结构和匹配语义的权威来源；插件只在 root 主动导入时读取清单，永不写入；
-- 如果配置也需要在主前端生效，必须在主前端仓库单独增加
-  `web/public/config/domains/{configKey}.json` 并发布主前端。
+- 只拥有 `white_label_domain_config`；
+- 不接收 `organizationId`、用户 ID、loginKey 或 assignment；
+- 管理接口使用主平台 Bearer token 做 root/admin 鉴权；
+- 公开接口不鉴权，因为配置本身被定义为公开运行时数据；
+- 运行时只访问自己的 MySQL，不依赖主前端、主后端、Redis 或 `yii3-a1`；
+- 主前端 manifest 只是一键导入来源，不是运行时配置源。
 
-### 主后端
+### 主前端与主后端
 
-- 不新增白牌表、控制器或写入逻辑；
-- 现有 `GET /v1/plugin/verify-token` 提供用户、角色和组织数组；
-- 可由前端使用现有组织列表接口提供 root 的组织选择；
-- 管理链路依赖主后端校验；Unity 读取链路不经过主后端。
-
-### 插件后端
-
-- 拥有三张白牌业务表、所有校验、审计和启停状态；
-- 每次管理请求都校验主平台 Bearer token，失败时关闭写操作；
-- 不信任前端提交的角色、用户 ID 或组织权限；
-- 两份 JSON 的字段名限制为可审计的 ASCII 标识符，并递归拒绝认证、token、密码、
-  私钥和连接串等敏感字段；
-- 向 Unity 暴露唯一的公开只读解析接口；它只接受两个正整数 ID，没有写操作；
-- 可从部署时固定的主前端 HTTPS origin 读取 root-only 导入清单；浏览器不能指定
-  URL，清单不可用也不会影响健康检查、CRUD 或 Unity 解析；
-- 域名配置以完整 `StaticDomainConfig` JSON 独立存储，`config.name` 派生
-  `configKey`，`config.description` 派生只读显示名；不保存当前访问 host。
+- 主前端继续使用原插件 iframe 协议，不新增白牌业务页面；
+- 既有登录二维码格式保持 `web_<loginKey>`；
+- 单独的临时登录上下文可包含当前前端 hostname、当前账户组织以及配置服务 URL；
+- 组织只供账户或其他业务使用，白牌插件不消费它；
+- 主前端可从已注册服务元数据提交配置服务 URL；主后端只做 HTTPS allow-list 校验并
+  将其作为不透明字符串保存，不拼接配置键、不查询插件数据库；
+- 上下文接口和 Redis 生命周期属于登录系统，不在本插件实现。
 
 ### yii3-a1
 
-- 不参与白牌读取链路；
-- 不连接插件数据库，也不保存白牌配置或共享令牌；
-- 白牌插件独立完成公开读取、缓存和三层启用校验。
+- 保持现有登录职责；
+- 不生成额外 `clientContextToken`；
+- 不读取白牌插件数据库，也不代理白牌配置；
+- 新客户端在完成原登录步骤之外，独立读取登录上下文和白牌服务。
 
-## 3. 权限模型
-
-| 操作 | root | admin |
-|---|---:|---:|
-| 查看全部组织配置 | 是 | 否 |
-| 创建、编辑、启停自己组织的 JSON | 是 | 是 |
-| 从主前端清单导入域名 JSON | 是 | 否 |
-| 创建、编辑、启停域名 JSON | 是 | 否 |
-| 创建、启停组织 × 域名组合 | 是 | 否 |
-| 查看自己组织的组合和二维码 | 是 | 是 |
-
-admin 可以属于多个组织。后端将 `verify-token` 返回的全部
-`organizations[].id` 组成 allow-list：
-
-- 查询在 SQL 层限制到 allow-list；
-- 创建和修改必须命中 allow-list；
-- 路径 ID、请求体和前端显示值都不能扩大范围；
-- admin 被移出组织后，下一次请求立即失去权限；
-- 多个 admin 编辑同一组织时由 `revision` 防止后写覆盖先写。
-
-插件数据库不保存用户属于哪些组织，避免复制主平台的身份关系。
-
-## 4. 数据模型
-
-### `white_label_organization_config`
-
-购买账号的购买方配置，每个主平台组织最多一条。
-
-| 字段 | 含义 |
-|---|---|
-| `organization_id` | 主平台数字组织 ID，唯一且作为外部索引 |
-| `organization_name` | 组织 slug 快照 |
-| `organization_title` | 显示名称快照 |
-| `schema_version` | 组织 JSON 契约版本 |
-| `revision` | 乐观锁版本 |
-| `config_json` | 购买方独立 JSON |
-| `is_enabled` | 是否可参与 Unity 解析 |
-| 审计字段 | 创建、更新、启停用户及时间 |
+## 3. 数据模型
 
 ### `white_label_domain_config`
 
-代理产品的代理方配置。表名沿用“domain”，但业务主键语义是主前端静态域名配置键，
-不是一个精确 hostname。
+表中一行代表一个主前端静态配置键/域名族，而不是每一个精确 hostname。
 
 | 字段 | 含义 |
 |---|---|
-| `id`（API 为 `domainId`） | 插件生成的数字域名 ID，二维码外部索引 |
-| `domain`（API 为 `configKey`） | 由 `config_json.name` 派生的静态域名配置键，全局唯一 |
-| `display_name` | 由 `config_json.description` 派生的只读显示名称 |
-| `schema_version` | 域名 JSON 契约版本 |
-| `revision` | 乐观锁版本 |
-| `config_json` | 与主前端 `StaticDomainConfig` 同结构的代理方独立快照 |
-| `is_enabled` | 是否可参与 Unity 解析 |
-| 审计字段 | 创建、更新、启停用户及时间 |
+| `id` / `domainId` | 管理端内部数字 ID，不进入公开协议 |
+| `domain` / `configKey` | `config_json.name` 的数据库唯一投影 |
+| `display_name` | `config_json.description` 的只读投影 |
+| `config_json` | 完整、自包含的 `StaticDomainConfig` 快照 |
+| `schema_version` | 当前只接受 1 |
+| `revision` | 乐观锁与缓存版本 |
+| `is_enabled` | 是否允许公开解析 |
+| 审计字段 | 创建、更新、启停的用户与时间 |
 
-`config_json` 是配置键和说明的权威来源。`domain`、`display_name` 只是写入时同步的
-数据库投影；列表、组合与 Unity 解析在读取时仍从 `config_json.name` 和
-`config_json.description` 派生，历史投影值不能覆盖 JSON。说明为空或纯空白时仅在
-界面回退显示配置键，不把配置键写回 `description`。
+`config_json` 是权威数据；服务端在写入时同步 `domain` 与 `display_name`。修改
+`config.name` 不改变内部 `domainId`。
 
-域名记录不硬删除。修改 `config.name` 会更新 `configKey`，但保留相同的数字
-`domainId`，所以二维码不需要暴露配置键。配置键表示域名族：主前端的匹配器可能让
-多个请求 hostname 命中它，例如 `d.dev.xrugc.com` 和 `dev.xrugc.com` 都可命中
-`dev.xrugc.com`。
-
-插件中的快照和主前端静态文件没有运行时同步关系。root 可把清单中的一项完整复制
-进编辑器，但保存后不会跟随主前端变化。若要让主前端识别一个新键，需要另行创建并
-发布 `web/public/config/domains/{configKey}.json`；仅在插件创建记录不会改变主前端
-行为。
-
-### `white_label_assignment`
-
-只表达允许的购买方 × 代理方组合，不保存 JSON。
-
-| 字段 | 含义 |
-|---|---|
-| `id`（API 为 `assignmentId`） | 内部数字主键 |
-| `organization_id` | 购买方组织 ID |
-| `domain_id` | 代理域名 ID |
-| `revision` | 乐观锁版本 |
-| `is_enabled` | 组合是否可解析 |
-| 审计字段 | 创建、更新、启停用户及时间 |
-
-`organization_id + domain_id` 唯一。只有组合、组织配置和域名配置三者都启用时，
-Unity 才能取得结果。
-
-## 5. 两份 JSON
-
-服务端永远不合并两个 JSON，也不建立字段覆盖优先级：
+域名 JSON 结构：
 
 ```json
 {
-  "version": 1,
-  "organization": {
-    "id": 42,
-    "name": "buyer-a",
-    "title": "购买方 A",
-    "schemaVersion": 1,
-    "revision": 3,
-    "config": {}
-  },
-  "domain": {
-    "id": 8,
-    "configKey": "dev.xrugc.com",
-    "schemaVersion": 1,
-    "revision": 5,
-    "config": {
-      "name": "dev.xrugc.com",
-      "description": "XR UGC Dev",
-      "is_active": true,
-      "fallback_domain": "default",
-      "default_config": {},
-      "configs": {}
-    }
+  "name": "dev.xrugc.com",
+  "description": "XR UGC Dev",
+  "is_active": true,
+  "fallback_domain": "default",
+  "default_config": {},
+  "configs": {
+    "zh-CN": {}
   }
 }
 ```
 
-Unity 分别解析 `organization.config` 和 `domain.config`。两份 JSON 都只能包含运行时
-公开配置；包名、签名、原生图标和版本号仍属于构建期属性。
+- `name` 必须等于 API 的 `configKey`；
+- `fallback_domain` 仅保留主前端格式兼容语义；
+- 保存的快照必须已物化 Unity 所需内容，运行时不递归读取 fallback；
+- JSON 不能包含认证凭据或秘密。
 
-### JSON Schema 与编辑器
+### 旧表兼容
 
-组织 JSON 和域名 JSON 使用两个独立、随插件版本管理的 Schema，不共享字段定义：
+旧版数据库可能仍有：
 
-- 组织 Schema v1 当前只要求顶层为 JSON object，并继续执行大小、深度、字段名和
-  敏感键检查；购买方格式固定后可以独立收紧；
-- 域名 Schema v1 对齐主前端 `StaticDomainConfig`：`name` 必填且等于
-  `configKey`，`description` 是显示名称，`is_active` 为 boolean，
-  `fallback_domain` 为 string 或 null，`default_config` 为 object，`configs` 是
-  语言到 object 的映射；
-- 域名快照必须自包含。`fallback_domain` 是格式兼容元数据，不是 Unity 读取链路；
-  插件和 Unity 不按它递归请求其他配置，纯外部 fallback 且自身内容为空的文档
-  会被拒绝。导入这类主前端文件时必须先物化所需有效内容；
-- 管理界面中的共享 JSON 编辑器提供语法高亮、行号、格式化、压缩、语法诊断和
-  Schema 诊断。任一校验失败时禁止提交。
+- `white_label_organization_config`；
+- `white_label_assignment`。
 
-Schema 只约束各自 JSON，不会把组织字段复制进域名 JSON，或把域名字段复制进组织
-JSON。需要让 root 动态编辑 Schema 时应另做有审计、版本迁移和兼容策略的功能，
-不属于当前最小实现。
+新代码完全不读写这两张表。切换时不执行 `DROP`、`DELETE` 或自动合并；现有数据留作
+审计与回滚。新安装的 `schema.sql` 只创建域名表。确认生产迁移和备份策略后，才能在
+独立运维变更中归档旧表。
 
-当前两侧都只实现 `schemaVersion: 1`。服务不会接受尚无验证器和 Unity 消费契约的
-任意未来版本；新增版本时必须先增加对应验证、迁移和客户端支持。
+组织 JSON 不能自动合入域名 JSON：多个组织可能曾连接到同一个域名，但新模型只能
+有一份域名配置。若旧组织内容仍有价值，必须由业务负责人明确选择字段并人工迁移。
 
-## 6. 失败与缓存
+## 4. hostname 解析
 
-- 任一 ID 非法、记录不存在、任一配置停用或组合停用：统一 404；
-- 插件后端不可用：Unity 按网络错误回退 last-known-good；
-- ETag 同时包含组合、组织和域名 revision；
-- If-None-Match 命中返回 304；
-- Unity 成功后保存 last-known-good；
-- 404 回退内置默认值，网络错误或 503 优先回退 last-known-good；
-- 绝不应用只有组织或只有域名的半份配置。
+公开请求必须显式传 `domain`。服务端不使用 HTTP `Host`、`Origin`、Referer 或
+`X-Forwarded-Host` 决定白牌。
+
+规范化：
+
+1. trim；
+2. 删除一个 DNS 尾点；
+3. 转为小写 ASCII/Punycode；
+4. 校验总长度与每个 DNS label；
+5. 拒绝 scheme、路径、查询、fragment、端口、userinfo、通配符和空 label。
+
+候选顺序与主前端 `domain-static-config.ts` 保持一致：
+
+```text
+d.dev.xrugc.com
+  1. dev.xrugc.com
+  2. xrugc.com
+  3. d.dev.xrugc.com
+```
+
+`www.` 也会先去前缀并逐级尝试父域名。候选按首次出现去重，数据库只做参数化精确
+匹配，不使用 `LIKE` 或无边界后缀匹配。
+
+解析规则：
+
+- 取候选顺序中第一条“存在的”记录；
+- 该记录只有在 `is_enabled = 1` 且 `config.is_active = true` 时返回；
+- 首条记录存在但停用时立即 404，不继续回退；
+- 所有非 default 候选均不存在时，可尝试配置键 `default`；
+- `default` 也必须由 root 显式保存并启用；
+- 没有可用结果时统一 404。
+
+这让停用操作成为可靠的品牌熔断，同时保留主前端现有的域名族语义。
+
+## 5. 权限模型
+
+| 操作 | root | admin | 未登录 |
+|---|---:|---:|---:|
+| 查看域名列表和详情 | 是 | 是 | 否 |
+| 创建、编辑、启停 | 是 | 否 | 否 |
+| 读取主前端导入清单 | 是 | 否 | 否 |
+| 调用公开 resolver | 是 | 是 | 是 |
+
+管理后端逐请求验证 Bearer token。前端隐藏按钮只是体验优化，不能替代后端权限。
+
+当前没有“admin 属于哪些域名”的权威关系，因此不能让 admin 按组织或当前 hostname
+获得写权限。未来如果增加域名管理员 ACL，它只影响管理 API，绝不能改变相同 hostname
+的公开解析结果。
+
+## 6. 响应、缓存与失败
+
+公开响应只包含一份域名配置：
+
+```json
+{
+  "version": 1,
+  "domain": {
+    "requestedDomain": "d.dev.xrugc.com",
+    "configKey": "dev.xrugc.com",
+    "isDomainFallback": true,
+    "revision": 5,
+    "schemaVersion": 1,
+    "config": {}
+  }
+}
+```
+
+- ETag 必须随实际响应内容及域名 revision 变化；
+- 响应允许缓存供 ETag 复用，但使用 `no-cache, must-revalidate` 要求每次应用前重新
+  验证；`If-None-Match` 命中返回 304，停用不会被旧 freshness 窗口延迟；
+- 非法、未知、停用统一 404，不暴露匹配过程；
+- 主后端故障时管理请求失败关闭，但公开解析不受影响；
+- Unity 成功后保存 ETag 和 last-known-good；网络错误优先使用 last-known-good，404
+  使用内置默认配置；
+- 白牌失败不能改变登录成功与否。

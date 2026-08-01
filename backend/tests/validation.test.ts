@@ -2,11 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   configJsonSchema,
   createDomainConfigSchema,
-  createOrganizationConfigSchema,
+  domainConfigCandidates,
   domainConfigKeySchema,
+  requestedDomainSchema,
+  resolveQuerySchema,
   staticDomainConfigSchema,
   updateDomainConfigSchema,
-  updateOrganizationConfigSchema,
 } from '../src/validation';
 
 describe('white-label JSON validation', () => {
@@ -178,34 +179,51 @@ describe('main-frontend domain config validation', () => {
   });
 });
 
-describe('organization schema version validation', () => {
-  it('defaults creates to schema v1 and requires explicit v1 on updates', () => {
-    const create = createOrganizationConfigSchema.safeParse({
-      organizationId: 12,
-      config: {},
+describe('public hostname validation and candidate generation', () => {
+  it.each([
+    ['DEV.XRUGC.COM', 'dev.xrugc.com'],
+    ['dev.xrugc.com.', 'dev.xrugc.com'],
+    ['BÜCHER.example', 'xn--bcher-kva.example'],
+    ['campus-agent', 'campus-agent'],
+    ['default', 'default'],
+  ])('normalizes %s to %s', (input, expected) => {
+    expect(requestedDomainSchema.parse(input)).toBe(expected);
+  });
+
+  it.each([
+    'https://dev.xrugc.com',
+    'dev.xrugc.com:443',
+    'dev.xrugc.com/path',
+    'dev.xrugc.com?x=1',
+    'dev.xrugc.com#fragment',
+    'user@dev.xrugc.com',
+    'dev xrugc.com',
+    'dev..xrugc.com',
+    'dev.xrugc.com..',
+  ])('rejects non-hostname input %s', (input) => {
+    expect(requestedDomainSchema.safeParse(input).success).toBe(false);
+  });
+
+  it('keeps the main frontend d/www/parent precedence and removes duplicates', () => {
+    expect(domainConfigCandidates('www.d.dev.xrugc.com')).toEqual([
+      'dev.xrugc.com',
+      'xrugc.com',
+      'd.dev.xrugc.com',
+      'www.d.dev.xrugc.com',
+    ]);
+    expect(domainConfigCandidates('d.dev.xrugc.com')).toEqual([
+      'dev.xrugc.com',
+      'xrugc.com',
+      'd.dev.xrugc.com',
+    ]);
+  });
+
+  it('accepts exactly one domain query and rejects legacy o/d', () => {
+    expect(resolveQuerySchema.parse({ domain: 'DEV.XRUGC.COM.' })).toEqual({
+      domain: 'dev.xrugc.com',
     });
-    expect(create.success).toBe(true);
-    if (create.success) {
-      expect(create.data.schemaVersion).toBe(1);
-    }
-    expect(createOrganizationConfigSchema.safeParse({
-      organizationId: 12,
-      schemaVersion: 2,
-      config: {},
-    }).success).toBe(false);
-    expect(updateOrganizationConfigSchema.safeParse({
-      revision: 1,
-      config: {},
-    }).success).toBe(false);
-    expect(updateOrganizationConfigSchema.safeParse({
-      schemaVersion: 2,
-      revision: 1,
-      config: {},
-    }).success).toBe(false);
-    expect(updateOrganizationConfigSchema.safeParse({
-      schemaVersion: 1,
-      revision: 1,
-      config: {},
-    }).success).toBe(true);
+    expect(resolveQuerySchema.safeParse({ o: 1, d: 1 }).success).toBe(false);
+    expect(resolveQuerySchema.safeParse({ domain: 'dev.xrugc.com', o: 1 }).success)
+      .toBe(false);
   });
 });

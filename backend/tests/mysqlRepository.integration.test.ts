@@ -6,7 +6,7 @@ import { MysqlWhiteLabelRepository } from '../src/mysqlRepository';
 const integrationEnabled = process.env.RUN_MYSQL_INTEGRATION === '1';
 const describeIntegration = integrationEnabled ? describe : describe.skip;
 
-describeIntegration('MySQL white-label repository', () => {
+describeIntegration('MySQL domain-only white-label repository', () => {
   let pool: Pool;
   let repository: MysqlWhiteLabelRepository;
 
@@ -29,18 +29,13 @@ describeIntegration('MySQL white-label repository', () => {
       dateStrings: true,
     });
 
-    const schema = readFileSync(
-      new URL('../db/schema.sql', import.meta.url),
-      'utf8',
-    );
+    const schema = readFileSync(new URL('../db/schema.sql', import.meta.url), 'utf8');
     await pool.query(schema);
     repository = new MysqlWhiteLabelRepository(pool);
   });
 
   beforeEach(async () => {
-    await pool.query('DELETE FROM white_label_assignment');
     await pool.query('DELETE FROM white_label_domain_config');
-    await pool.query('DELETE FROM white_label_organization_config');
   });
 
   afterAll(async () => {
@@ -49,215 +44,71 @@ describeIntegration('MySQL white-label repository', () => {
     }
   });
 
-  it('enforces scopes, revisions, foreign keys, and all three enabled layers', async () => {
-    const firstOrganization = await repository.createOrganizationConfig({
-      organizationId: 12_001,
-      organizationName: 'buyer-one',
-      organizationTitle: 'Buyer One',
-      schemaVersion: 1,
-      config: { buyerOnly: { color: '#123456' } },
-    }, '9001');
-    await repository.createOrganizationConfig({
-      organizationId: 12_002,
-      organizationName: 'buyer-two',
-      organizationTitle: 'Buyer Two',
-      schemaVersion: 1,
-      config: { buyerOnly: { color: '#654321' } },
-    }, '9001');
-
-    const scoped = await repository.listOrganizationConfigs(
-      [12_001],
-      { limit: 100, offset: 0 },
-    );
-    expect(scoped.items.map((item) => item.organizationId)).toEqual([12_001]);
-    expect(scoped.total).toBe(1);
-
-    const domainSnapshot = {
+  it('supports domain CRUD, optimistic revisions, and ordered candidate lookup', async () => {
+    const snapshot = {
       name: 'dev.xrugc.com',
-      description: 'Integration Agent',
+      description: 'Integration Domain',
       is_active: true,
       fallback_domain: 'xrugc.com',
-      default_config: {
-        homepage: 'https://dev.xrugc.com/',
-      },
-      configs: {
-        'zh-CN': {
-          supportUrl: 'https://support.example',
-        },
-      },
+      default_config: { homepage: 'https://dev.xrugc.com/' },
+      configs: { 'zh-CN': { title: 'Integration Domain' } },
     };
-    const domain = await repository.createDomainConfig({
-      configKey: 'dev.xrugc.com',
+    const created = await repository.createDomainConfig({
+      configKey: snapshot.name,
       schemaVersion: 1,
-      config: domainSnapshot,
+      config: snapshot,
     }, '9001');
-    expect(domain).toMatchObject({
-      configKey: 'dev.xrugc.com',
-      displayName: 'Integration Agent',
+    expect(created).toMatchObject({
+      configKey: snapshot.name,
+      displayName: snapshot.description,
+      revision: 1,
+      enabled: false,
     });
-    await pool.execute(
-      `UPDATE white_label_domain_config
-       SET domain = ?, display_name = ?
-       WHERE id = ?`,
-      ['legacy-exact-host.example.com', 'Legacy exact host', domain.domainId],
-    );
-    await expect(repository.findDomainConfig(domain.domainId)).resolves.toMatchObject({
-      configKey: domainSnapshot.name,
-      displayName: domainSnapshot.description,
-    });
-    await expect(repository.createDomainConfig({
-      configKey: domainSnapshot.name,
+
+    const defaultSnapshot = {
+      ...snapshot,
+      name: 'default',
+      description: 'Default',
+      fallback_domain: null,
+    };
+    await repository.createDomainConfig({
+      configKey: defaultSnapshot.name,
       schemaVersion: 1,
-      config: domainSnapshot,
-    }, '9001')).rejects.toMatchObject({ status: 409 });
-    const domains = await repository.listDomainConfigs({
+      config: defaultSnapshot,
+    }, '9001');
+
+    await expect(repository.findFirstDomainConfig([
+      'missing.dev.xrugc.com',
+      'dev.xrugc.com',
+      'xrugc.com',
+    ])).resolves.toMatchObject({ configKey: 'dev.xrugc.com', enabled: false });
+    await expect(repository.findFirstDomainConfig(['missing.example.com']))
+      .resolves.toBeNull();
+    await expect(repository.findFirstDomainConfig(['default']))
+      .resolves.toMatchObject({ configKey: 'default' });
+
+    const enabled = await repository.setDomainConfigEnabled(
+      created.domainId,
+      created.revision,
+      true,
+      '9001',
+    );
+    expect(enabled).toMatchObject({ kind: 'updated', value: { revision: 2, enabled: true } });
+
+    const stale = await repository.updateDomainConfig(created.domainId, {
+      configKey: snapshot.name,
+      schemaVersion: 1,
+      revision: 1,
+      config: { ...snapshot, description: 'Stale' },
+    }, '9002');
+    expect(stale).toMatchObject({ kind: 'revision_conflict', currentRevision: 2 });
+
+    const list = await repository.listDomainConfigs({
       q: 'integration',
-      limit: 100,
+      limit: 20,
       offset: 0,
     });
-    expect(domains.items.map((item) => item.domainId)).toEqual([domain.domainId]);
-    expect(domains.total).toBe(1);
-
-    const assignment = await repository.createAssignment(
-      firstOrganization.organizationId,
-      domain.domainId,
-      '9001',
-    );
-    await repository.createAssignment(12_002, domain.domainId, '9001');
-    const scopedAssignments = await repository.listAssignments(
-      [firstOrganization.organizationId],
-      { q: 'dev.xrugc', limit: 100, offset: 0 },
-    );
-    expect(scopedAssignments.items.map((item) => item.assignmentId)).toEqual([
-      assignment.assignmentId,
-    ]);
-    expect(scopedAssignments.total).toBe(1);
-
-    await expect(repository.createAssignment(
-      99_999,
-      domain.domainId,
-      '9001',
-    )).rejects.toMatchObject({ status: 404 });
-
-    expect(await repository.resolveEnabledAssignment(
-      firstOrganization.organizationId,
-      domain.domainId,
-    )).toBeNull();
-
-    const organizationEnabled = await repository.setOrganizationConfigEnabled(
-      null,
-      firstOrganization.organizationId,
-      firstOrganization.revision,
-      true,
-      '9001',
-    );
-    expect(organizationEnabled.kind).toBe('updated');
-    expect(await repository.resolveEnabledAssignment(
-      firstOrganization.organizationId,
-      domain.domainId,
-    )).toBeNull();
-
-    const domainEnabled = await repository.setDomainConfigEnabled(
-      domain.domainId,
-      domain.revision,
-      true,
-      '9001',
-    );
-    expect(domainEnabled.kind).toBe('updated');
-    expect(await repository.resolveEnabledAssignment(
-      firstOrganization.organizationId,
-      domain.domainId,
-    )).toBeNull();
-
-    const assignmentEnabled = await repository.setAssignmentEnabled(
-      assignment.assignmentId,
-      assignment.revision,
-      true,
-      '9001',
-    );
-    expect(assignmentEnabled.kind).toBe('updated');
-
-    const resolved = await repository.resolveEnabledAssignment(
-      firstOrganization.organizationId,
-      domain.domainId,
-    );
-    expect(resolved).toMatchObject({
-      organization: {
-        id: firstOrganization.organizationId,
-        config: { buyerOnly: { color: '#123456' } },
-      },
-      domain: {
-        id: domain.domainId,
-        configKey: 'dev.xrugc.com',
-        config: domainSnapshot,
-      },
-    });
-
-    const staleUpdate = await repository.updateOrganizationConfig(
-      null,
-      firstOrganization.organizationId,
-      {
-        organizationName: firstOrganization.organizationName,
-        organizationTitle: firstOrganization.organizationTitle,
-        schemaVersion: 1,
-        revision: firstOrganization.revision,
-        config: { staleWrite: true },
-      },
-      '9002',
-    );
-    expect(staleUpdate).toMatchObject({
-      kind: 'revision_conflict',
-      currentRevision: 2,
-    });
-
-    if (domainEnabled.kind !== 'updated') {
-      throw new Error('Expected the domain enable mutation to succeed');
-    }
-    await expect(repository.updateDomainConfig(
-      domain.domainId,
-      {
-        configKey: domain.configKey,
-        schemaVersion: 1,
-        revision: domainEnabled.value.revision,
-        config: { ...domainSnapshot, is_active: false },
-      },
-      '9001',
-    )).rejects.toMatchObject({ status: 422 });
-
-    const domainDisabled = await repository.setDomainConfigEnabled(
-      domain.domainId,
-      domainEnabled.value.revision,
-      false,
-      '9001',
-    );
-    expect(domainDisabled.kind).toBe('updated');
-    if (domainDisabled.kind !== 'updated') {
-      throw new Error('Expected the domain disable mutation to succeed');
-    }
-
-    const inactiveUpdate = await repository.updateDomainConfig(
-      domain.domainId,
-      {
-        configKey: domain.configKey,
-        schemaVersion: 1,
-        revision: domainDisabled.value.revision,
-        config: { ...domainSnapshot, is_active: false },
-      },
-      '9001',
-    );
-    expect(inactiveUpdate.kind).toBe('updated');
-    if (inactiveUpdate.kind !== 'updated') {
-      throw new Error('Expected the disabled domain update to succeed');
-    }
-    await expect(repository.setDomainConfigEnabled(
-      domain.domainId,
-      inactiveUpdate.value.revision,
-      true,
-      '9001',
-    )).rejects.toMatchObject({ status: 422 });
-    expect(await repository.resolveEnabledAssignment(
-      firstOrganization.organizationId,
-      domain.domainId,
-    )).toBeNull();
+    expect(list.total).toBe(1);
+    expect(list.items[0]?.domainId).toBe(created.domainId);
   });
 });

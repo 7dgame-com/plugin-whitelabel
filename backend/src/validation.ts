@@ -1,3 +1,4 @@
+import { domainToASCII } from 'node:url';
 import { z, type ZodType } from 'zod';
 import { unprocessable } from './errors';
 import type { JsonObject, JsonValue, StaticDomainConfig } from './types';
@@ -138,17 +139,6 @@ const rawConfigSecuritySchema = z.unknown().superRefine((value, context) => {
 export const configJsonSchema = rawConfigSecuritySchema
   .pipe(z.record(jsonFieldNameSchema, jsonValueSchema)) as ZodType<JsonObject>;
 
-export const organizationNameSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(191)
-  .regex(
-    /^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/,
-    'organizationName must be a stable organization identifier',
-  )
-  .transform((value) => value.toLowerCase());
-
 export const domainConfigKeySchema = z
   .string()
   .min(1)
@@ -157,6 +147,52 @@ export const domainConfigKeySchema = z
     /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/,
     'configKey must be a lowercase domain-config key or slug without a scheme, path, whitespace, or empty label',
   );
+
+const requestedDomainTextSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(1_024)
+  .refine(
+    (value) => !/[\s/:?#@\\]/.test(value),
+    'domain must be a hostname or slug without a scheme, port, credentials, path, query, or fragment',
+  )
+  .transform((value) => {
+    const withoutOneTrailingDot = value.endsWith('.') ? value.slice(0, -1) : value;
+    return domainToASCII(withoutOneTrailingDot).toLowerCase();
+  });
+
+export const requestedDomainSchema = requestedDomainTextSchema.pipe(domainConfigKeySchema);
+
+/** Mirrors the main frontend's exact domain candidate precedence. */
+export function domainConfigCandidates(domain: string): string[] {
+  const candidates: string[] = [];
+  const addDomainAndParents = (domainName: string): void => {
+    let candidate = domainName;
+    while (candidate) {
+      candidates.push(candidate);
+      const nextDot = candidate.indexOf('.');
+      if (nextDot < 0) {
+        break;
+      }
+      const nextCandidate = candidate.slice(nextDot + 1);
+      if (!nextCandidate.includes('.')) {
+        break;
+      }
+      candidate = nextCandidate;
+    }
+  };
+
+  const publicDomain = domain.startsWith('www.') ? domain.slice(4) : domain;
+  if (publicDomain.startsWith('d.')) {
+    addDomainAndParents(publicDomain.slice(2));
+  }
+  if (domain.startsWith('www.')) {
+    addDomainAndParents(domain.slice(4));
+  }
+  addDomainAndParents(domain);
+  return [...new Set(candidates.filter(Boolean))];
+}
 
 export const positiveIdSchema = z.coerce
   .number()
@@ -168,24 +204,6 @@ const schemaVersionV1Schema = z.literal(1, {
   invalid_type_error: 'schemaVersion must be 1',
 });
 const revisionSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
-
-export const createOrganizationConfigSchema = z
-  .object({
-    organizationId: positiveIdSchema,
-    schemaVersion: schemaVersionV1Schema.default(1),
-    config: configJsonSchema,
-    enabled: z.literal(false).default(false),
-  })
-  .strict();
-
-export const updateOrganizationConfigSchema = z
-  .object({
-    schemaVersion: schemaVersionV1Schema,
-    config: configJsonSchema,
-    revision: revisionSchema,
-  })
-  .strict();
-
 const jsonObjectSchema = z.record(jsonFieldNameSchema, jsonValueSchema);
 
 export function hasLocalDomainConfigData(
@@ -265,14 +283,6 @@ export const updateDomainConfigSchema = z
   .strict()
   .superRefine(matchingDomainConfigKey);
 
-export const createAssignmentSchema = z
-  .object({
-    organizationId: positiveIdSchema,
-    domainId: positiveIdSchema,
-    enabled: z.literal(false).default(false),
-  })
-  .strict();
-
 export const revisionBodySchema = z
   .object({
     revision: revisionSchema,
@@ -289,8 +299,7 @@ export const listQuerySchema = z
 
 export const resolveQuerySchema = z
   .object({
-    o: positiveIdSchema,
-    d: positiveIdSchema,
+    domain: requestedDomainSchema,
   })
   .strict();
 

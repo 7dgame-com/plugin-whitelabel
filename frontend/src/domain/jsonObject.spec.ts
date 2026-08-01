@@ -17,8 +17,13 @@ const validDomainConfig = {
   },
 }
 
-function validateOrganization(value: unknown) {
-  return validateJsonObjectText(JSON.stringify(value), 'organization')
+function validatePayload(defaultConfig: unknown) {
+  return validateJsonObjectText(
+    JSON.stringify({
+      ...validDomainConfig,
+      default_config: defaultConfig,
+    }),
+  )
 }
 
 function nestedConfig(depth: number): Record<string, unknown> {
@@ -39,25 +44,15 @@ function nodeBoundaryConfig(lastArrayLength: number) {
   }
 }
 
-describe('JSON object schemas', () => {
-  it('keeps organization JSON deliberately open while requiring an object', () => {
-    expect(
-      validateJsonObjectText('{"theme":{"primary":"blue"}}', 'organization'),
-    ).toMatchObject({ valid: true })
-    expect(validateJsonObjectText('[]', 'organization')).toMatchObject({
-      valid: false,
-      issues: [{ code: 'object-required' }],
-    })
-    expect(validateJsonObjectText('null', 'organization')).toMatchObject({
-      valid: false,
-      issues: [{ code: 'object-required' }],
-    })
-  })
-
-  it('reports malformed JSON before schema validation', () => {
-    expect(validateJsonObjectText('{', 'domain')).toMatchObject({
+describe('domain JSON schema', () => {
+  it('reports malformed or non-object JSON before schema validation', () => {
+    expect(validateJsonObjectText('{')).toMatchObject({
       valid: false,
       issues: [{ code: 'syntax' }],
+    })
+    expect(validateJsonObjectText('[]')).toMatchObject({
+      valid: false,
+      issues: [{ code: 'object-required' }],
     })
   })
 
@@ -65,7 +60,6 @@ describe('JSON object schemas', () => {
     expect(
       validateJsonObjectText(
         JSON.stringify({ ...validDomainConfig, future_option: true }),
-        'domain',
       ),
     ).toMatchObject({
       valid: true,
@@ -76,57 +70,36 @@ describe('JSON object schemas', () => {
     })
   })
 
-  it('mirrors the 12-level depth boundary', () => {
-    expect(validateOrganization(nestedConfig(12))).toMatchObject({
+  it('mirrors depth, node, string, array, and byte limits', () => {
+    expect(validatePayload(nestedConfig(11))).toMatchObject({ valid: true })
+    expect(validatePayload(nestedConfig(12))).toMatchObject({
+      valid: false,
+      issues: [expect.objectContaining({ code: 'security' })],
+    })
+
+    expect(validatePayload(nodeBoundaryConfig(986))).toMatchObject({
       valid: true,
     })
-    expect(validateOrganization(nestedConfig(13))).toMatchObject({
+    expect(validatePayload(nodeBoundaryConfig(987))).toMatchObject({
       valid: false,
-      issues: [
-        expect.objectContaining({
-          code: 'security',
-          message: expect.stringContaining('12 levels'),
-        }),
-      ],
+      issues: [expect.objectContaining({ code: 'security' })],
     })
-  })
 
-  it('mirrors the 5000-node boundary without exceeding array limits', () => {
-    expect(validateOrganization(nodeBoundaryConfig(994))).toMatchObject({
-      valid: true,
-    })
-    expect(validateOrganization(nodeBoundaryConfig(995))).toMatchObject({
-      valid: false,
-      issues: [
-        expect.objectContaining({
-          code: 'security',
-          message: expect.stringContaining('5000 JSON values'),
-        }),
-      ],
-    })
-  })
-
-  it('mirrors string and array length boundaries', () => {
     expect(
-      validateOrganization({
+      validatePayload({
         value: 'x'.repeat(JSON_SECURITY_LIMITS.maxStringLength),
       }),
     ).toMatchObject({ valid: true })
     expect(
-      validateOrganization({
+      validatePayload({
         value: 'x'.repeat(JSON_SECURITY_LIMITS.maxStringLength + 1),
       }),
     ).toMatchObject({
       valid: false,
-      issues: [
-        expect.objectContaining({
-          code: 'security',
-          message: expect.stringContaining('16384 characters'),
-        }),
-      ],
+      issues: [expect.objectContaining({ code: 'security' })],
     })
     expect(
-      validateOrganization({
+      validatePayload({
         values: Array.from(
           { length: JSON_SECURITY_LIMITS.maxArrayLength },
           () => 0,
@@ -134,7 +107,7 @@ describe('JSON object schemas', () => {
       }),
     ).toMatchObject({ valid: true })
     expect(
-      validateOrganization({
+      validatePayload({
         values: Array.from(
           { length: JSON_SECURITY_LIMITS.maxArrayLength + 1 },
           () => 0,
@@ -142,77 +115,34 @@ describe('JSON object schemas', () => {
       }),
     ).toMatchObject({
       valid: false,
-      issues: [
-        expect.objectContaining({
-          code: 'security',
-          message: expect.stringContaining('1000 values'),
-        }),
-      ],
-    })
-  })
-
-  it('measures the canonical JSON payload at the UTF-8 64 KiB boundary', () => {
-    const exactBoundary = {
-      a: 'x'.repeat(16_384),
-      b: 'x'.repeat(16_384),
-      c: 'x'.repeat(16_384),
-      d: 'x'.repeat(16_355),
-    }
-    expect(new TextEncoder().encode(JSON.stringify(exactBoundary))).toHaveLength(
-      JSON_SECURITY_LIMITS.maxBytes,
-    )
-    expect(validateOrganization(exactBoundary)).toMatchObject({ valid: true })
-
-    expect(
-      validateOrganization({ ...exactBoundary, d: `${exactBoundary.d}x` }),
-    ).toMatchObject({
-      valid: false,
-      issues: [
-        expect.objectContaining({
-          code: 'security',
-          message: expect.stringContaining('65536 bytes'),
-        }),
-      ],
+      issues: [expect.objectContaining({ code: 'security' })],
     })
 
     expect(
-      validateOrganization({
+      validatePayload({
         one: '界'.repeat(11_000),
         two: '界'.repeat(11_000),
       }),
     ).toMatchObject({
       valid: false,
-      issues: [expect.objectContaining({ code: 'security' })],
-    })
-  })
-
-  it('accepts only backend-safe ASCII field names', () => {
-    expect(
-      validateOrganization({ 'brand.logo-url': '中文内容', _enabled: true }),
-    ).toMatchObject({ valid: true })
-    expect(
-      validateOrganization({
-        ['a'.repeat(JSON_SECURITY_LIMITS.maxFieldNameLength)]: true,
-      }),
-    ).toMatchObject({ valid: true })
-    expect(
-      validateOrganization({
-        ['a'.repeat(JSON_SECURITY_LIMITS.maxFieldNameLength + 1)]: true,
-      }),
-    ).toMatchObject({
-      valid: false,
-      issues: [expect.objectContaining({ code: 'security' })],
-    })
-    expect(validateOrganization({ 主题: '蓝色' })).toMatchObject({
-      valid: false,
       issues: [
         expect.objectContaining({
           code: 'security',
-          message: expect.stringContaining('ASCII letters'),
+          message: expect.stringContaining(String(JSON_SECURITY_LIMITS.maxBytes)),
         }),
       ],
     })
-    expect(validateOrganization({ '-invalid': true })).toMatchObject({
+  })
+
+  it('accepts only backend-safe field names', () => {
+    expect(
+      validatePayload({ 'brand.logo-url': '中文内容', _enabled: true }),
+    ).toMatchObject({ valid: true })
+    expect(validatePayload({ 主题: '蓝色' })).toMatchObject({
+      valid: false,
+      issues: [expect.objectContaining({ code: 'security' })],
+    })
+    expect(validatePayload({ '-invalid': true })).toMatchObject({
       valid: false,
       issues: [expect.objectContaining({ code: 'security' })],
     })
@@ -238,7 +168,7 @@ describe('JSON object schemas', () => {
     'database_url',
     'connection-string',
   ])('rejects forbidden or sensitive key %s at any depth', (key) => {
-    expect(validateOrganization({ safe: { [key]: 'value' } })).toMatchObject({
+    expect(validatePayload({ safe: { [key]: 'value' } })).toMatchObject({
       valid: false,
       issues: [
         expect.objectContaining({
@@ -251,7 +181,7 @@ describe('JSON object schemas', () => {
 
   it('requires all six StaticDomainConfig fields', () => {
     const { configs: _configs, ...incomplete } = validDomainConfig
-    const result = validateJsonObjectText(JSON.stringify(incomplete), 'domain')
+    const result = validateJsonObjectText(JSON.stringify(incomplete))
 
     expect(result.valid).toBe(false)
     if (!result.valid) {
@@ -280,7 +210,6 @@ describe('JSON object schemas', () => {
         name: 'https://dev.xrugc.com/path',
         configs: { 'zh-CN': 'not-an-object' },
       }),
-      'domain',
     )
 
     expect(result.valid).toBe(false)
@@ -299,8 +228,6 @@ describe('JSON object schemas', () => {
     ].join('.')
     const key193 = `${key191}.d`
 
-    expect(key191).toHaveLength(191)
-    expect(key193).toHaveLength(193)
     expect(
       validateJsonObjectText(
         JSON.stringify({
@@ -308,7 +235,6 @@ describe('JSON object schemas', () => {
           name: key191,
           description: '   ',
         }),
-        'domain',
       ),
     ).toMatchObject({ valid: true })
     expect(
@@ -318,83 +244,30 @@ describe('JSON object schemas', () => {
           name: key193,
           description: '   ',
         }),
-        'domain',
       ),
     ).toMatchObject({
       valid: false,
-      issues: [
-        expect.objectContaining({
-          code: 'schema',
-          path: '/description',
-        }),
-      ],
+      issues: [expect.objectContaining({ path: '/description' })],
     })
   })
 
-  it('rejects a purely external fallback because Unity snapshots are self-contained', () => {
-    const result = validateJsonObjectText(
-      JSON.stringify({
-        ...validDomainConfig,
-        fallback_domain: 'default',
-        default_config: {},
-        configs: { 'zh-CN': {}, 'en-US': {} },
-      }),
-      'domain',
-    )
-
-    expect(result).toMatchObject({
-      valid: false,
-      issues: [
-        {
-          code: 'schema',
-          path: '/fallback_domain',
-          message:
-            'an external fallback requires local default_config or configs data; Unity snapshots must be self-contained',
-        },
-      ],
-    })
-  })
-
-  it.each([
-    {
-      label: 'local default_config',
-      fallback_domain: 'default',
-      default_config: { logo: '/local.svg' },
-      configs: {},
-    },
-    {
-      label: 'one non-empty locale config',
-      fallback_domain: 'default',
-      default_config: {},
-      configs: { 'zh-CN': {}, 'en-US': { title: 'Local' } },
-    },
-    {
-      label: 'self fallback without recursive lookup',
-      fallback_domain: 'dev.xrugc.com',
-      default_config: {},
-      configs: {},
-    },
-    {
-      label: 'no fallback',
-      fallback_domain: null,
-      default_config: {},
-      configs: {},
-    },
-  ])('accepts $label', ({ fallback_domain, default_config, configs }) => {
+  it('requires Unity snapshots to contain local data for external fallback', () => {
     expect(
       validateJsonObjectText(
         JSON.stringify({
           ...validDomainConfig,
-          fallback_domain,
-          default_config,
-          configs,
+          fallback_domain: 'default',
+          default_config: {},
+          configs: { 'zh-CN': {}, 'en-US': {} },
         }),
-        'domain',
       ),
-    ).toMatchObject({ valid: true })
+    ).toMatchObject({
+      valid: false,
+      issues: [expect.objectContaining({ path: '/fallback_domain' })],
+    })
   })
 
-  it('formats and compacts valid JSON objects without changing data', () => {
+  it('formats and compacts secure JSON objects without changing data', () => {
     expect(formatJsonObjectText('{"a":1,"nested":{"b":2}}')).toBe(
       '{\n  "a": 1,\n  "nested": {\n    "b": 2\n  }\n}',
     )

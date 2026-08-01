@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildWhiteLabelPublicBaseUrl,
   buildDomainCatalogManifestUrl,
+  buildVerifyTokenUrl,
   loadConfig,
 } from '../src/config';
 
@@ -12,37 +12,18 @@ const requiredEnvironment: NodeJS.ProcessEnv = {
   DB_USER: 'whitelabel',
   DB_PASSWORD: 'password',
   MAIN_API_BASE_URL: 'https://api.example.com',
-  WHITELABEL_PUBLIC_BASE_URL: 'https://whitelabel.example.com',
 };
 
-describe('white-label public base URL', () => {
-  it('requires HTTPS in production', () => {
-    expect(() =>
-      buildWhiteLabelPublicBaseUrl('http://whitelabel.example.com', 'production'),
-    ).toThrow(/HTTPS/);
-    expect(
-      buildWhiteLabelPublicBaseUrl('https://whitelabel.example.com', 'production').origin,
-    ).toBe('https://whitelabel.example.com');
+describe('main API token verifier URL', () => {
+  it('uses only the fixed verify-token route', () => {
+    expect(buildVerifyTokenUrl('https://api.example.com/base').toString()).toBe(
+      'https://api.example.com/base/v1/plugin/verify-token',
+    );
   });
 
-  it('allows plain HTTP only for loopback development origins', () => {
-    expect(
-      buildWhiteLabelPublicBaseUrl('http://localhost:8093', 'development').origin,
-    ).toBe('http://localhost:8093');
-    expect(() =>
-      buildWhiteLabelPublicBaseUrl('http://whitelabel.internal:8093', 'development'),
-    ).toThrow(/loopback/);
-  });
-
-  it('rejects paths, credentials, queries, and fragments', () => {
-    for (const value of [
-      'https://user@example.com',
-      'https://whitelabel.example.com/base',
-      'https://whitelabel.example.com?x=1',
-      'https://whitelabel.example.com#fragment',
-    ]) {
-      expect(() => buildWhiteLabelPublicBaseUrl(value, 'production')).toThrow();
-    }
+  it('rejects credentials and non-http protocols', () => {
+    expect(() => buildVerifyTokenUrl('https://user@example.com')).toThrow();
+    expect(() => buildVerifyTokenUrl('file:///tmp/api')).toThrow();
   });
 });
 
@@ -78,23 +59,18 @@ describe('main frontend domain catalog URL', () => {
     }
   });
 
-  it('keeps the optional catalog out of startup dependencies when unset', () => {
-    const missing = loadConfig({
+  it('has no organization-directory or public-base startup dependency', () => {
+    const config = loadConfig({
       ...requiredEnvironment,
       NODE_ENV: 'production',
     });
-    expect(missing.domainCatalogManifestUrl).toBeNull();
-    expect(missing.domainCatalogTimeoutMs).toBe(3_000);
-
-    const blank = loadConfig({
-      ...requiredEnvironment,
-      NODE_ENV: 'production',
-      MAIN_FRONTEND_PUBLIC_BASE_URL: '',
-    });
-    expect(blank.domainCatalogManifestUrl).toBeNull();
+    expect(config.domainCatalogManifestUrl).toBeNull();
+    expect(config.domainCatalogTimeoutMs).toBe(3_000);
+    expect(config).not.toHaveProperty('organizationListUrl');
+    expect(config).not.toHaveProperty('publicBaseUrl');
   });
 
-  it('loads the configured fixed source and bounded timeout', () => {
+  it('loads the optional fixed catalog source and bounded timeout', () => {
     const config = loadConfig({
       ...requiredEnvironment,
       MAIN_FRONTEND_PUBLIC_BASE_URL: 'https://frontend.example.com',

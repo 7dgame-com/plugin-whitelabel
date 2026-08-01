@@ -1,147 +1,64 @@
 # White-label backend
 
-This service owns three independently versioned resources:
+This service owns one independently versioned resource: a domain-family JSON
+snapshot with the main frontend's `StaticDomainConfig` semantics. White-label
+resolution is domain-only; organization and login context belong to other
+systems and are never stored, queried, or returned here.
 
-- organization JSON, keyed by the main platform's numeric organization id;
-- a domain-family JSON snapshot with main-frontend `StaticDomainConfig` semantics,
-  keyed externally by a plugin-owned numeric domain id;
-- an organization/domain assignment with publish state but no JSON.
+The service does not read the main-platform database. Management Bearer tokens
+are verified through the fixed main API `verify-token` endpoint. The optional
+main-frontend domain catalog is a root-only import helper; saved JSON is an
+independent snapshot and public resolution never calls the main frontend.
 
-The service has no dependency on the main platform database. It validates the
-main-platform session on every management request and exposes one public,
-read-only resolve endpoint for Unity QR lookups.
+## Security and permissions
 
-The domain resource does not represent one exact request hostname. Its
-`configKey` is derived from `config.name` and identifies the same domain family
-as a main-frontend file such as `web/public/config/domains/dev.xrugc.com.json`.
-For example, the main frontend can resolve `d.dev.xrugc.com` through the
-`dev.xrugc.com` key. The numeric `domainId` remains the short, stable value used
-by QR parameter `d`.
-
-The plugin stores an independent full snapshot. A root-only management helper
-may read the main frontend's fixed public manifest and return a one-time import
-candidate, but saving never creates synchronization. Unity resolution neither
-reads nor writes the main frontend at runtime. Publishing the same key to the
-main frontend remains a separate change and deployment.
-
-## Security boundaries
-
-- Management routes require `Authorization: Bearer ...`. The token is sent to the
-  fixed `MAIN_API_BASE_URL/v1/plugin/verify-token` endpoint for every request.
-- Root manages every resource. Admin is SQL-scoped to numeric organization ids in
-  the verified session, can manage only those organization configs, and has
-  read-only access to their assignments and QR URLs.
-- Admin cannot manage domain configs or create/enable/disable assignments.
-- Organization snapshots written by admin come from the verified session. Root
-  writes resolve the numeric id through the fixed main-platform
-  `/v1/organization/list` endpoint. Neither role trusts request-body snapshots.
-- Organization titles follow the main platform's 255-character limit. Domain
-  display names remain limited to 191 characters.
-- A domain `configKey` is globally unique, follows the static domain-config key
-  grammar, and must exactly match `config.name`. It is never derived from an HTTP
-  Host header. `displayName` is a read-only projection of `config.description`.
-- The public resolver accepts only positive organization/domain IDs. Missing,
-  invalid, disabled, or partially disabled combinations all return the same
-  `404`; IDs are public locators rather than authorization credentials.
-- Organization and domain JSON reject secret-bearing field names and are
-  size/depth constrained, including nested variants such as `clientSecret`,
-  `dbPassword`, `signingKey`, `authorization`, `jwt`, and token-bearing keys.
-  Field names use an ASCII-only identifier grammar so Unicode confusables cannot
-  bypass this control.
-- There are no delete routes. Every update and enable/disable requires the current
-  `revision`.
-- QR URLs use only fixed `WHITELABEL_PUBLIC_BASE_URL`; request headers cannot alter them.
-  Production startup requires this URL to use HTTPS.
-- Domain imports use only the fixed `MAIN_FRONTEND_PUBLIC_BASE_URL` origin and
-  `/config/domains/manifest.json`. The client cannot select a URL, redirects are
-  rejected, response size/time/count are bounded, and production requires HTTPS.
-  Invalid individual entries are disabled without hiding valid entries.
-
-Organization and domain JSON use separate versioned schemas. Organization schema
-v1 requires a top-level object. Domain schema v1 validates the
-`StaticDomainConfig` shape and the invariant `config.name === configKey`. A
-schema change on one resource never changes the other resource.
-
-Only `schemaVersion: 1` is implemented and accepted. A domain snapshot must be
-self-contained for Unity. `fallback_domain` is preserved as format-compatible
-metadata, but the plugin never dereferences it at runtime; a pure external
-fallback document with empty `default_config` and `configs` is rejected.
+- `root` and `admin` may list and inspect domain records.
+- Only `root` may create, update, enable, disable, or use the import catalog.
+- New records are disabled and every mutation uses optimistic `revision` checks.
+- `configKey` must exactly equal `config.name`. Secret-bearing JSON fields are
+  rejected recursively and snapshots are size/depth constrained.
+- An enabled database record must also have `config.is_active === true` before
+  it is publicly resolvable.
+- There are no delete routes.
 
 ## Management API
 
-Organization configuration (root/admin within scope):
+- `GET /api/v1/domain-import-catalog` — root only; optional import candidates
+- `GET /api/v1/domain-configs` — root/admin
+- `POST /api/v1/domain-configs` — root only
+- `GET /api/v1/domain-configs/:domainId` — root/admin
+- `PUT /api/v1/domain-configs/:domainId` — root only
+- `POST /api/v1/domain-configs/:domainId/enable` — root only
+- `POST /api/v1/domain-configs/:domainId/disable` — root only
 
-- `GET /api/v1/organization-configs`
-- `POST /api/v1/organization-configs`
-- `GET /api/v1/organization-configs/:organizationId`
-- `PUT /api/v1/organization-configs/:organizationId`
-- `POST /api/v1/organization-configs/:organizationId/enable`
-- `POST /api/v1/organization-configs/:organizationId/disable`
-
-Domain configuration (root only):
-
-- `GET /api/v1/domain-import-catalog` — optional, one-time import candidates
-- `GET /api/v1/domain-configs`
-- `POST /api/v1/domain-configs`
-- `GET /api/v1/domain-configs/:domainId`
-- `PUT /api/v1/domain-configs/:domainId`
-- `POST /api/v1/domain-configs/:domainId/enable`
-- `POST /api/v1/domain-configs/:domainId/disable`
-
-Assignments:
-
-- `GET /api/v1/assignments` — root sees all; admin sees only session organizations
-- `POST /api/v1/assignments` — root only
-- `POST /api/v1/assignments/:assignmentId/enable` — root only
-- `POST /api/v1/assignments/:assignmentId/disable` — root only
-
-New resources are always disabled. There is no hard-delete endpoint.
-Assignment responses include organization and domain display summaries for the UI
-and a `qrUrl` generated from the fixed plugin origin, while retaining full audit fields.
-
-Domain create input contains `configKey`, `schemaVersion`, and the full `config`
-snapshot; update additionally contains `revision`. Clients do not submit
-`displayName` or a request hostname:
-
-```json
-{
-  "configKey": "dev.xrugc.com",
-  "schemaVersion": 1,
-  "config": {
-    "name": "dev.xrugc.com",
-    "description": "XR UGC Dev",
-    "is_active": true,
-    "fallback_domain": "default",
-    "default_config": {},
-    "configs": {}
-  }
-}
-```
+Domain create input contains `configKey`, `schemaVersion`, and the complete
+snapshot. Updates additionally contain `revision`. `displayName` is derived
+from the snapshot and cannot be submitted independently.
 
 ## Public Unity API
 
 ```http
-GET /v1/white-label-configs?o=12&d=34
-If-None-Match: "wl-o12-r4-d34-r2-a7"
+GET /v1/white-label-configs?domain=d.dev.xrugc.com
 ```
 
-The endpoint returns data only when the assignment, organization config, and
-domain config are all enabled:
+The query accepts only a hostname or slug. Schemes, credentials, ports, paths,
+queries, and fragments are rejected. Input is lowercased, one trailing dot is
+removed, and IDNs are converted to ASCII.
+
+Lookup precedence mirrors the main frontend: `d.` candidates first, then
+`www.`, then the exact hostname and progressively broader parent domains, with
+duplicates removed. An explicitly configured `default` record is considered
+only when none of those records exists. If the first configured match is
+disabled or its snapshot is inactive, resolution returns `404` without falling
+through to a broader/default record.
 
 ```json
 {
   "version": 1,
-  "organization": {
-    "id": 12,
-    "name": "acme",
-    "title": "Acme Academy",
-    "revision": 4,
-    "schemaVersion": 1,
-    "config": {}
-  },
   "domain": {
-    "id": 34,
+    "requestedDomain": "d.dev.xrugc.com",
     "configKey": "dev.xrugc.com",
+    "isDomainFallback": true,
     "revision": 2,
     "schemaVersion": 1,
     "config": {
@@ -156,39 +73,31 @@ domain config are all enabled:
 }
 ```
 
-ETag incorporates assignment, organization, and domain revisions, so independent
-JSON updates correctly invalidate caches. `If-None-Match` returns `304`.
+The response contains no organization data or database id. A strong ETag is
+derived from the complete response; `Cache-Control: public, no-cache,
+must-revalidate` permits storage but requires validation before reuse, and
+`If-None-Match` may return `304`. Disabling a record therefore remains an
+immediate operational kill switch for compliant clients and intermediaries.
 
-The endpoint is intentionally public because QR data is public runtime branding.
-It has no write operations and never accepts a database address, hostname key,
-upstream URL, or authorization scope from the caller. Apply edge rate limiting
-at the deployment proxy.
+## Database compatibility
+
+`db/schema.sql` creates only `white_label_domain_config` for new installs. It
+contains no destructive statements. Organization/assignment tables left by an
+older deployment are therefore preserved as rollback data but are not used by
+the runtime.
 
 ## Run
 
 1. Create a database and apply `db/schema.sql`.
-2. From the repository root copy the root `.env.example` to `.env`, then replace
-   credentials and tokens. Development startup loads that root file without
-   overriding environment variables already supplied by the process.
-3. From the repository root run `pnpm install`, `pnpm --filter
-   @7dgame/plugin-whitelabel-backend build`, then `pnpm --filter
-   @7dgame/plugin-whitelabel-backend start`.
+2. Configure MySQL and `MAIN_API_BASE_URL` in the environment.
+3. Optionally set `MAIN_FRONTEND_PUBLIC_BASE_URL` for the import catalog.
+4. Run `corepack pnpm --dir backend build` and then start `dist/server.js`.
 
-`WHITELABEL_PUBLIC_BASE_URL` must be a pure origin such as
-`https://whitelabel.example.com`;
-paths, queries, and fragments are rejected.
-
-`MAIN_FRONTEND_PUBLIC_BASE_URL` is optional and must also be a pure origin. If
-omitted or unavailable, only `GET /api/v1/domain-import-catalog` returns `503`;
-startup, health, CRUD, and public resolution continue normally. Imported JSON
-is a snapshot and is never refreshed automatically. `DOMAIN_CATALOG_TIMEOUT_MS`
-defaults to 3000 and cannot exceed 10000.
-
-The MySQL repository integration test is opt-in and refuses database names that
-do not end in `_test`:
+The MySQL integration test is opt-in and refuses database names that do not end
+in `_test`:
 
 ```bash
 MYSQL_TEST_DATABASE=whitelabel_test \
 MYSQL_TEST_PORT=3338 \
-pnpm --filter @7dgame/plugin-whitelabel-backend test:mysql
+corepack pnpm --dir backend test:mysql
 ```

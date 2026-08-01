@@ -1,89 +1,119 @@
-# XRUGC 白牌插件
+# XRUGC 域名白牌插件
 
-`plugin-whitelabel` 是 XRUGC / MrPP 的独立白牌配置插件。它把购买方和代理方建模为
-两个完全独立的配置资源：
+`plugin-whitelabel` 是一个独立的域名白牌配置服务。白牌结果只由当前前端的完整
+hostname 决定，与用户、账号、组织和登录方式无关。
 
-- **组织 JSON**：购买账号的购买方配置；
-- **域名 JSON**：代理产品的代理方配置，是与主前端 `StaticDomainConfig` 同结构的
-  独立快照；
-- **组合授权**：只声明某个组织可以搭配某个域名，不保存或合并 JSON；
-- **HTTPS 二维码**：二维码是白牌插件公开只读 REST 地址，Unity 扫描后直接 `GET`
-  获取两份独立 JSON。
+插件只保存一类数据：与主前端 `StaticDomainConfig` 同结构的域名 JSON 快照。请求
+`d.dev.xrugc.com` 时，插件按主前端既有候选规则找到 `dev.xrugc.com` 配置键，并返回
+这一份 JSON。
 
-这里的“域名”不是某一个精确 hostname，而是主前端静态域名配置的
-`configKey` / 域名族。例如请求域名 `d.dev.xrugc.com` 会命中配置键
-`dev.xrugc.com`。插件另外生成稳定的数字 `domainId`，二维码中的 `d` 只放这个
-数字 ID。
-
-## 最终架构
+## 最终边界
 
 ```text
 主前端 PluginSystem
   └─ iframe 加载 plugin-whitelabel frontend
-       ├─ /api/*      -> 现有主后端（会话和组织身份）
-       └─ /backend/*  -> plugin-whitelabel backend（管理 API）
+       ├─ /api/*      -> 主后端（仅验证当前管理用户）
+       └─ /backend/*  -> 插件后端（域名配置管理）
 
 plugin-whitelabel backend
-  ├─ 逐请求调用主后端 /v1/plugin/verify-token
-  ├─ root 管理时可从主前端固定 manifest 一次性导入域名 JSON
-  └─ 独立 MySQL
-       ├─ white_label_organization_config
-       ├─ white_label_domain_config
-       └─ white_label_assignment
+  ├─ 管理请求逐次调用主后端 /v1/plugin/verify-token
+  ├─ root 可从主前端固定 domain manifest 一次性导入
+  └─ 独立 MySQL：white_label_domain_config
 
-二维码 HTTPS URL
-  └─ plugin-whitelabel backend /v1/white-label-configs?o={organizationId}&d={domainId}
-       └─ 直接读取插件 MySQL 中已启用的组织、域名与组合
+Unity
+  └─ GET /v1/white-label-configs?domain={完整 hostname}
+       └─ 直接从插件 MySQL 解析并取得一份域名 JSON
 ```
 
-主前端只在构建时汇总已有公开域名 JSON，不新增白牌数据表或运行时业务；主后端也
-不新增白牌业务代码或数据表，只继续作为管理身份与组织权威源。Unity 读取链路不
-经过主前端、主后端或 `yii3-a1`。
+- 插件不接收、不保存也不判断组织；
+- 插件没有组织配置、组织 × 域名 assignment 或二维码生成功能；
+- 公开解析不经过主前端、主后端或 `yii3-a1`；
+- `yii3-a1` 继续只负责原有登录，不读取插件数据库；
+- 登录二维码保持原样：`web_<loginKey>`；
+- 新 Unity 客户端所需的前端域名、组织信息和配置服务地址属于另一份临时登录上下文，
+  不属于白牌数据模型。组织可供其他业务使用，但不得传给白牌解析接口。
 
-## 域名配置键与主前端的关系
+独立登录上下文的职责和兼容流程见
+[登录上下文与 Unity 接入](docs/login-context-integration.md)。该上下文不在本插件仓库
+实现。
 
-- 插件保存完整的域名 JSON 快照，`config.name` 就是 `configKey`，例如
-  `dev.xrugc.com`；`config.description` 用作显示名称；
-- 主前端构建会把 `web/public/config/domains/*.json` 汇总为公开只读的
-  `/config/domains/manifest.json`；root 可以在域名弹窗中搜索并一次性导入；
-- 导入会完整替换编辑器内容，保存后成为插件自己的快照，不会自动同步。Unity
-  和插件解析接口不读取 manifest，因此主前端停机不会影响已经保存的配置；
-- 快照必须已经包含 Unity 所需的有效内容。导入工具会从同一份 manifest 有界解析
-  外部 fallback，并分别补齐缺失的默认配置和语言配置；`fallback_domain` 仍只作为
-  格式元数据保存，插件解析接口和 Unity 都不会在运行时递归抓取；
-- 主前端现有匹配规则会去掉 `d.` / `www.` 并逐级尝试父域名，所以
-  `d.dev.xrugc.com` 可以命中 `dev.xrugc.com`；
-- 如果同一配置也要被主前端识别，必须另行新增并发布
-  `web/public/config/domains/{configKey}.json`。插件不会自动把数据同步进主前端。
+## 域名如何匹配配置键
 
-域名快照示例见 [`docs/domain-config.example.json`](docs/domain-config.example.json)，
-组织 JSON 示例见
-[`docs/organization-config.example.json`](docs/organization-config.example.json)。两者的
-字段空间互不影响，后端和 Unity 都不会把它们合并。
+管理端保存的是主前端静态域名配置键，而不是每一个精确 hostname：
 
-完整设计见：
+- `config.name` 是唯一 `configKey`，例如 `dev.xrugc.com`；
+- `config.description` 是只读显示说明的来源；
+- `config_json` 是完整、自包含的 `StaticDomainConfig` 快照；
+- root 可从主前端 `/config/domains/manifest.json` 选择并复制一项，保存后与主前端
+  文件独立，不会自动同步；
+- 运行时对 hostname 做小写和 IDN ASCII 规范化，再按主前端相同的 `d.`、`www.` 和
+  父域名顺序匹配；
+- 只有在所有域名候选都没有数据库记录时，才可命中显式存在且启用的 `default`；
+- 如果更具体的首条记录存在但被停用，直接返回 404，不越过它套用其他品牌；
+- `fallback_domain` 只是已物化快照的格式元数据，运行时不递归读取其他文件。
 
-- [架构与权限](docs/architecture.md)
-- [REST API 契约](docs/api.md)
-- [HTTPS 二维码协议](docs/qr-protocol.md)
-- [部署与接入](docs/deployment.md)
+例如：
 
-## 权限摘要
+```text
+d.dev.xrugc.com
+  -> dev.xrugc.com
+  -> xrugc.com
+  -> d.dev.xrugc.com
+  -> default（仅前面完全没有记录时）
+```
+
+## 权限
 
 | 能力 | root | admin |
 |---|---:|---:|
-| 管理所有组织 JSON | 是 | 否 |
-| 管理自己所属组织 JSON | 是 | 是 |
-| 管理域名 JSON | 是 | 否 |
-| 管理组织 × 域名组合 | 是 | 否 |
-| 查看自己组织的组合和二维码 | 是 | 是 |
+| 查看域名配置和完整 JSON | 是 | 是 |
+| 创建、编辑、启停域名配置 | 是 | 否 |
+| 从主前端 manifest 导入 | 是 | 否 |
 
-admin 可以同时属于多个组织。其组织范围完全取自主后端 `verify-token` 当前返回的
-组织 ID，不在插件数据库复制用户—组织关系。
+域名是全局资源。移除组织后已不存在可用于限制 admin 写入范围的权威关系，因此 admin
+只能读。以后如需委托写权限，应单独建立“用户 → 可管理域名”ACL；该 ACL 只管理后台
+权限，不能参与公开白牌解析。
+
+## 公开接口
+
+```http
+GET /v1/white-label-configs?domain=d.dev.xrugc.com
+```
+
+```json
+{
+  "version": 1,
+  "domain": {
+    "requestedDomain": "d.dev.xrugc.com",
+    "configKey": "dev.xrugc.com",
+    "isDomainFallback": true,
+    "revision": 5,
+    "schemaVersion": 1,
+    "config": {
+      "name": "dev.xrugc.com",
+      "description": "XR UGC Dev",
+      "is_active": true,
+      "fallback_domain": "default",
+      "default_config": {},
+      "configs": {}
+    }
+  }
+}
+```
+
+`domainId` 只供管理 API 和数据库内部使用，不进入 Unity 协议。旧的 `o`、`d` 参数不
+再接受。
+
+详细设计：
+
+- [架构与权限](docs/architecture.md)
+- [REST API 契约](docs/api.md)
+- [登录上下文与 Unity 接入](docs/login-context-integration.md)
+- [部署与数据切换](docs/deployment.md)
 
 ## 本地开发
 
-需要 Node.js 22+、pnpm 10+ 和 Docker。
+需要 Node.js 22+、pnpm 10.12.1 和 Docker。
 
 ```bash
 cp .env.example .env
@@ -92,68 +122,46 @@ pnpm install
 pnpm dev
 ```
 
-默认端口：
-
 | 服务 | 地址 |
 |---|---|
 | 插件前端 | `http://localhost:3012` |
 | 插件后端 | `http://localhost:8093` |
 | 插件 MySQL | `localhost:3337` |
-| 主后端（外部依赖） | `http://localhost:8081` |
-| Unity 公开读取接口 | `http://localhost:8093/v1/white-label-configs` |
+| 主后端（管理鉴权依赖） | `http://localhost:8081` |
+| Unity 公开读取 | `http://localhost:8093/v1/white-label-configs?domain=dev.xrugc.com` |
 
 ## 主前端注册
 
-通过 `system-admin` 动态注册时，提交
-[`system-admin-registration.example.json`](system-admin-registration.example.json)。
-该写 API 使用 snake_case 字段，其中必须保持：
+动态注册示例见
+[`system-admin-registration.example.json`](system-admin-registration.example.json)。插件
+保持 `access_scope = admin-only`，让 root 与 admin 都能进入；真正的写权限由插件
+后端逐请求强制为 root-only。注册记录使用公共组织范围
+`organization_name = NULL`，这只是宿主插件可见性，不是白牌解析条件。
 
-```json
-{
-  "id": "whitelabel",
-  "name": "白牌配置",
-  "url": "http://localhost:3012/",
-  "icon": "Brush",
-  "enabled": 1,
-  "order": 30,
-  "access_scope": "admin-only",
-  "organization_name": null,
-  "version": "1.0.0"
-}
+## 分支与 CI/CD
+
+- `develop`：开发集成；
+- `main`：经过验证的稳定代码；
+- `publish`：生产发布。
+
+分支 push 会运行类型检查、单元测试、MySQL 集成测试和构建，并发布对应 tag 的前后
+端镜像。`publish` 另外更新 `latest`：
+
+```text
+hkccr.ccs.tencentyun.com/plugins/plugin-whitelabel-frontend
+hkccr.ccs.tencentyun.com/plugins/plugin-whitelabel-backend
 ```
 
-[`plugins.json.example`](plugins.json.example) 则是主前端静态插件目录使用的 camelCase
-格式，不可直接作为 system-admin 写 API 的请求体。
-
-插件注册记录保持公共组织范围（`organization_name = NULL`）。真正的数据范围由插件
-后端逐请求校验，不能依赖前端路由守卫。
-
-## 分支约定
-
-- `develop`：日常集成分支；
-- `main`：经过验证的稳定代码；
-- `publish`：生产发布分支。
-
-三个分支的 push 都会执行类型检查、单元测试、真实 MySQL 集成测试和生产构建。
-验证通过后，Docker 工作流会向腾讯容器镜像服务推送两个独立镜像：
-
-- `hkccr.ccs.tencentyun.com/plugins/plugin-whitelabel-frontend`；
-- `hkccr.ccs.tencentyun.com/plugins/plugin-whitelabel-backend`。
-
-分支与镜像 tag 一一对应；`publish` 还会同时更新 `latest`。数据库使用标准 MySQL 8，
-不构建或发布插件私有数据库镜像。详细规则见[部署文档](docs/deployment.md#6-分支与-cicd)。
+本次重构只允许在 `develop` 和开发环境验证；未完成安全确认前不得合并或部署
+`main`、`publish`、`latest`。
 
 ## 安全约束
 
-- 两份 `config_json` 都会下发到 Unity，应始终视为公开数据；
-- 组织和域名使用两个独立 JSON Schema。组织 v1 只要求顶层为 object；域名 v1
-  校验 `StaticDomainConfig` 字段以及 `config.name === configKey`；
-- 当前只实现 `schemaVersion: 1`，创建时可省略并默认填 1，更新必须显式提交 1；
-- 管理界面共用 JSON 编辑器，提供语法高亮、行号、格式化、压缩和实时 Schema
-  诊断；JSON 或 Schema 校验失败时不能保存；
-- JSON 中禁止 token、密码、签名密钥、数据库连接串等秘密；
-- JSON 字段名只允许 ASCII 字母、数字、点、下划线和连字符，避免 Unicode 同形键绕过；
-- 新配置和新组合默认停用，确认后显式启用；
-- 所有修改和启停操作使用 `revision` 乐观锁；
-- 不提供硬删除，避免数字 ID 被复用后使旧二维码指向新对象；
-- Unity 必须保存内置默认值和 last-known-good，远端失败不能阻塞启动。
+- 域名 JSON 经公开接口下发，必须视为公开数据；
+- hostname 参数拒绝 scheme、路径、端口、userinfo、通配符和空标签；
+- 公开解析只使用显式参数，不读取 `Host` 或 `X-Forwarded-Host` 决定品牌；
+- JSON 限制大小、深度、节点数和字段名，并拒绝 token、密码、私钥、数据库连接串等
+  敏感字段；
+- 新配置默认停用，修改和启停使用 `revision` 乐观锁；
+- 不提供硬删除，避免 ID 复用并保留审计；
+- Unity 保存内置默认值和 last-known-good，远端失败不能阻塞登录或启动。

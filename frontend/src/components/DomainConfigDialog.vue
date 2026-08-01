@@ -1,21 +1,30 @@
 <template>
   <el-dialog
     :model-value="visible"
-    :title="record ? t('domain.editTitle') : t('domain.createTitle')"
+    :title="
+      readOnly
+        ? t('domain.viewTitle')
+        : record
+          ? t('domain.editTitle')
+          : t('domain.createTitle')
+    "
     width="min(720px, 92vw)"
     destroy-on-close
     :close-on-click-modal="false"
     @update:model-value="emit('update:visible', $event)"
   >
     <el-alert
-      :title="t('domain.agentBoundary')"
-      type="warning"
+      :title="
+        readOnly ? t('domain.readOnlyBoundary') : t('domain.editBoundary')
+      "
+      :type="readOnly ? 'info' : 'warning'"
       :closable="false"
       show-icon
       class="dialog-boundary"
     />
 
     <section
+      v-if="!readOnly"
       class="domain-import"
       :aria-label="t('domain.importTitle')"
     >
@@ -123,7 +132,7 @@
       <el-form-item :label="t('domain.json')" prop="json">
         <JsonObjectEditor
           v-model="form.json"
-          schema="domain"
+          :read-only="readOnly"
           :aria-label="t('domain.json')"
         />
       </el-form-item>
@@ -131,9 +140,14 @@
 
     <template #footer>
       <el-button @click="emit('update:visible', false)">
-        {{ t('common.cancel') }}
+        {{ readOnly ? t('common.close') : t('common.cancel') }}
       </el-button>
-      <el-button type="primary" :loading="saving" @click="submit">
+      <el-button
+        v-if="!readOnly"
+        type="primary"
+        :loading="saving"
+        @click="submit"
+      >
         {{ t('common.save') }}
       </el-button>
     </template>
@@ -169,6 +183,7 @@ const props = defineProps<{
   visible: boolean
   saving: boolean
   record: DomainConfigRecord | null
+  readOnly: boolean
 }>()
 
 const emit = defineEmits<{
@@ -282,7 +297,7 @@ async function importSelectedConfig(): Promise<void> {
 }
 
 function parseJson(): StaticDomainConfig | null {
-  const parsed = validateJsonObjectText(form.json, 'domain')
+  const parsed = validateJsonObjectText(form.json)
   if (!parsed.valid) {
     ElMessage.error(t('common.jsonInvalid'))
     return null
@@ -291,6 +306,7 @@ function parseJson(): StaticDomainConfig | null {
 }
 
 async function submit(): Promise<void> {
+  if (props.readOnly) return
   if (!formRef.value) return
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
@@ -312,7 +328,14 @@ watch(
   ([visible]) => {
     if (visible) {
       reset()
-      void loadImportCatalog()
+      if (props.readOnly) {
+        invalidateImportCatalogRequest()
+        catalogItems.value = []
+        catalogSource.value = ''
+        catalogLoadFailed.value = false
+      } else {
+        void loadImportCatalog()
+      }
     } else {
       invalidateImportCatalogRequest()
     }

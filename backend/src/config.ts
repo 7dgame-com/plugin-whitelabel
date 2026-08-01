@@ -19,7 +19,6 @@ const environmentSchema = z
     MAIN_API_TIMEOUT_MS: z.coerce.number().int().min(250).max(30_000).default(5_000),
     MAIN_FRONTEND_PUBLIC_BASE_URL: optionalUrlString,
     DOMAIN_CATALOG_TIMEOUT_MS: z.coerce.number().int().min(250).max(10_000).default(3_000),
-    WHITELABEL_PUBLIC_BASE_URL: z.string().url(),
   })
   .passthrough();
 
@@ -35,11 +34,9 @@ export interface AppConfig {
     connectionLimit: number;
   };
   verifyTokenUrl: URL;
-  organizationListUrl: URL;
   mainApiTimeoutMs: number;
   domainCatalogManifestUrl: URL | null;
   domainCatalogTimeoutMs: number;
-  publicBaseUrl: URL;
 }
 
 export function buildVerifyTokenUrl(baseUrl: string): URL {
@@ -53,48 +50,6 @@ export function buildVerifyTokenUrl(baseUrl: string): URL {
     parsed.pathname += '/';
   }
   return new URL('v1/plugin/verify-token', parsed);
-}
-
-export function buildOrganizationListUrl(baseUrl: string): URL {
-  const parsed = new URL(baseUrl);
-  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
-    throw new Error('MAIN_API_BASE_URL must use http/https and must not contain credentials');
-  }
-  parsed.search = '';
-  parsed.hash = '';
-  if (!parsed.pathname.endsWith('/')) {
-    parsed.pathname += '/';
-  }
-  return new URL('v1/organization/list', parsed);
-}
-
-export function buildWhiteLabelPublicBaseUrl(
-  baseUrl: string,
-  nodeEnv: AppConfig['nodeEnv'],
-): URL {
-  const parsed = new URL(baseUrl);
-  if (
-    !['http:', 'https:'].includes(parsed.protocol)
-    || parsed.username
-    || parsed.password
-    || parsed.search
-    || parsed.hash
-    || parsed.pathname !== '/'
-  ) {
-    throw new Error(
-      'WHITELABEL_PUBLIC_BASE_URL must be a pure http(s) origin without credentials, path, query, or fragment',
-    );
-  }
-  if (nodeEnv === 'production' && parsed.protocol !== 'https:') {
-    throw new Error('WHITELABEL_PUBLIC_BASE_URL must use HTTPS in production');
-  }
-  if (
-    parsed.protocol === 'http:'
-    && !['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)
-  ) {
-    throw new Error('Plain HTTP WHITELABEL_PUBLIC_BASE_URL is allowed only for a loopback host');
-  }
-  return parsed;
 }
 
 export function buildDomainCatalogManifestUrl(
@@ -134,7 +89,6 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
       connectionLimit: parsed.DB_CONNECTION_LIMIT,
     },
     verifyTokenUrl: buildVerifyTokenUrl(parsed.MAIN_API_BASE_URL),
-    organizationListUrl: buildOrganizationListUrl(parsed.MAIN_API_BASE_URL),
     mainApiTimeoutMs: parsed.MAIN_API_TIMEOUT_MS,
     domainCatalogManifestUrl: parsed.MAIN_FRONTEND_PUBLIC_BASE_URL === undefined
       ? null
@@ -143,9 +97,5 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
         parsed.NODE_ENV,
       ),
     domainCatalogTimeoutMs: parsed.DOMAIN_CATALOG_TIMEOUT_MS,
-    publicBaseUrl: buildWhiteLabelPublicBaseUrl(
-      parsed.WHITELABEL_PUBLIC_BASE_URL,
-      parsed.NODE_ENV,
-    ),
   };
 }

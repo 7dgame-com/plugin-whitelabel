@@ -10,18 +10,15 @@ vi.mock('./client', () => ({
 
 import { backendApi } from './client'
 import {
-  createAssignment,
   createDomainConfig,
-  createOrganizationConfig,
+  getDomainConfig,
   getDomainImportCatalog,
-  listAssignments,
-  listOrganizationConfigs,
-  normalizeAssignment,
+  listDomainConfigs,
   normalizeDomainConfig,
   normalizeDomainImportCatalog,
   normalizeDomainImportCatalogItem,
-  setAssignmentEnabled,
-  updateOrganizationConfig,
+  setDomainConfigEnabled,
+  updateDomainConfig,
 } from './whiteLabelManagement'
 
 function catalogConfig() {
@@ -61,26 +58,24 @@ function catalogPayload(
   }
 }
 
-describe('three-resource management API contract', () => {
+describe('domain-only management API contract', () => {
   beforeEach(() => {
     vi.mocked(backendApi.get).mockReset()
     vi.mocked(backendApi.post).mockReset()
     vi.mocked(backendApi.put).mockReset()
   })
 
-  it('lists organization JSON records with canonical pagination', async () => {
+  it('lists domain JSON records with canonical pagination', async () => {
     vi.mocked(backendApi.get).mockResolvedValue({
       data: {
         data: {
           items: [
             {
-              organizationId: 42,
-              organizationName: 'buyer',
-              organizationTitle: '购买方',
+              domainId: 8,
               schemaVersion: 1,
-              enabled: true,
               revision: 3,
-              config: { tenantName: 'Buyer' },
+              enabled: true,
+              config: catalogConfig(),
             },
           ],
           total: 1,
@@ -90,85 +85,36 @@ describe('three-resource management API contract', () => {
       },
     })
 
-    const result = await listOrganizationConfigs({
-      q: 'buyer',
+    const result = await listDomainConfigs({
+      q: 'xrugc',
       page: 2,
       pageSize: 10,
     })
 
-    expect(backendApi.get).toHaveBeenCalledWith('/organization-configs', {
-      params: { q: 'buyer', page: 2, pageSize: 10 },
+    expect(backendApi.get).toHaveBeenCalledWith('/domain-configs', {
+      params: { q: 'xrugc', page: 2, pageSize: 10 },
     })
     expect(result.items[0]).toMatchObject({
-      organizationId: 42,
-      organizationName: 'buyer',
+      domainId: 8,
+      configKey: 'xrugc-family',
       enabled: true,
       revision: 3,
-      config: { tenantName: 'Buyer' },
     })
   })
 
-  it('creates organization and domain JSON as independent disabled records', async () => {
-    vi.mocked(backendApi.post).mockResolvedValue({ data: { data: {} } })
-
-    const domainConfig = {
-      name: 'dev.xrugc.com',
-      description: 'XR UGC Dev',
-      is_active: true,
-      fallback_domain: null,
-      default_config: { agentBrand: 'north' },
-      configs: {},
-    }
-
-    await createOrganizationConfig({
-      organizationId: 42,
-      schemaVersion: 1,
-      config: { buyerTheme: 'blue' },
-    })
-    await createDomainConfig({
-      configKey: 'dev.xrugc.com',
-      schemaVersion: 1,
-      config: domainConfig,
-    })
-
-    expect(backendApi.post).toHaveBeenNthCalledWith(
-      1,
-      '/organization-configs',
-      {
-        organizationId: 42,
-        schemaVersion: 1,
-        config: { buyerTheme: 'blue' },
-      },
-    )
-    expect(backendApi.post).toHaveBeenNthCalledWith(2, '/domain-configs', {
-      configKey: 'dev.xrugc.com',
-      schemaVersion: 1,
-      config: domainConfig,
-    })
-    expect(vi.mocked(backendApi.post).mock.calls[0]?.[1]).not.toHaveProperty(
-      'enabled',
-    )
-    expect(vi.mocked(backendApi.post).mock.calls[1]?.[1]).not.toHaveProperty(
-      'enabled',
-    )
-  })
-
-  it('treats config.name and config.description as authoritative domain identity', () => {
+  it('treats config.name and config.description as authoritative identity', () => {
     expect(
       normalizeDomainConfig({
         domainId: 8,
-        configKey: 'legacy-exact-host.example.com',
-        displayName: 'Legacy exact host',
+        configKey: 'legacy.example.com',
+        displayName: 'Legacy',
         schemaVersion: 1,
         revision: 2,
         enabled: true,
         config: {
+          ...catalogConfig(),
           name: 'dev.xrugc.com',
           description: 'XR UGC Dev',
-          is_active: true,
-          fallback_domain: null,
-          default_config: {},
-          configs: {},
         },
       }),
     ).toMatchObject({
@@ -178,47 +124,56 @@ describe('three-resource management API contract', () => {
     })
   })
 
-  it('preserves an empty JSON description for presentation-layer fallback', () => {
-    expect(
-      normalizeDomainConfig({
-        domainId: 8,
-        configKey: 'legacy-exact-host.example.com',
-        displayName: 'Legacy exact host',
-        schemaVersion: 1,
-        revision: 2,
-        enabled: true,
-        config: {
-          name: 'dev.xrugc.com',
-          description: '',
-          is_active: true,
-          fallback_domain: null,
-          default_config: {},
-          configs: {},
-        },
-      }).description,
-    ).toBe('')
+  it('loads one domain record for full JSON viewing', async () => {
+    vi.mocked(backendApi.get).mockResolvedValue({
+      data: { data: { domainId: 8, config: catalogConfig() } },
+    })
+
+    const result = await getDomainConfig(8)
+
+    expect(backendApi.get).toHaveBeenCalledWith('/domain-configs/8')
+    expect(result.config).toEqual(catalogConfig())
+  })
+
+  it('creates, updates, and toggles a domain record with revision locking', async () => {
+    const config = catalogConfig()
+    vi.mocked(backendApi.post).mockResolvedValue({ data: { data: {} } })
+    vi.mocked(backendApi.put).mockResolvedValue({ data: { data: {} } })
+
+    await createDomainConfig({
+      configKey: config.name,
+      schemaVersion: 1,
+      config,
+    })
+    await updateDomainConfig(8, {
+      configKey: config.name,
+      schemaVersion: 1,
+      revision: 5,
+      config,
+    })
+    await setDomainConfigEnabled(8, true, 6)
+
+    expect(backendApi.post).toHaveBeenNthCalledWith(1, '/domain-configs', {
+      configKey: 'xrugc-family',
+      schemaVersion: 1,
+      config,
+    })
+    expect(backendApi.put).toHaveBeenCalledWith('/domain-configs/8', {
+      configKey: 'xrugc-family',
+      schemaVersion: 1,
+      revision: 5,
+      config,
+    })
+    expect(backendApi.post).toHaveBeenNthCalledWith(
+      2,
+      '/domain-configs/8/enable',
+      { revision: 6 },
+    )
   })
 
   it('loads and normalizes the one-time main-frontend import catalog', async () => {
     const config = catalogConfig()
-    vi.mocked(backendApi.get).mockResolvedValue({
-      data: {
-        data: {
-          source: 'web/public/config/domains/index.json',
-          items: [
-            {
-              configKey: 'xrugc-family',
-              description: 'XR UGC agent family',
-              isActive: true,
-              importable: true,
-              materializedFrom: ['base.json', 'xrugc-family.json'],
-              warnings: ['fallback was materialized'],
-              config,
-            },
-          ],
-        },
-      },
-    })
+    vi.mocked(backendApi.get).mockResolvedValue({ data: { data: catalogPayload() } })
 
     const result = await getDomainImportCatalog()
 
@@ -264,11 +219,7 @@ describe('three-resource management API contract', () => {
   it.each([
     ['source', catalogPayload({}, { source: 42 }), /catalog\.source/],
     ['items', catalogPayload({}, { items: {} }), /catalog\.items/],
-    [
-      'empty items',
-      { source: 'source', items: [] },
-      /at least one item/,
-    ],
+    ['empty items', { source: 'source', items: [] }, /at least one item/],
     ['item', { source: 'source', items: [null] }, /items\[0\]/],
     ['configKey', catalogPayload({ configKey: 42 }), /configKey/],
     ['description', catalogPayload({ description: null }), /description/],
@@ -285,11 +236,7 @@ describe('three-resource management API contract', () => {
   })
 
   it.each([
-    [
-      'missing config',
-      catalogPayload({ config: undefined }),
-      /config/,
-    ],
+    ['missing config', catalogPayload({ config: undefined }), /config/],
     [
       'schema-invalid config',
       catalogPayload({
@@ -352,32 +299,6 @@ describe('three-resource management API contract', () => {
       /reason/,
     ],
     [
-      'non-string reason',
-      {
-        configKey: 'broken-family',
-        description: 'Broken family',
-        isActive: false,
-        importable: false,
-        materializedFrom: [],
-        warnings: [],
-        reason: 42,
-      },
-      /reason/,
-    ],
-    [
-      'invalid materializedFrom',
-      {
-        configKey: 'broken-family',
-        description: 'Broken family',
-        isActive: false,
-        importable: false,
-        materializedFrom: [42],
-        warnings: [],
-        reason: 'Unavailable',
-      },
-      /materializedFrom/,
-    ],
-    [
       'invalid warnings',
       {
         configKey: 'broken-family',
@@ -400,110 +321,5 @@ describe('three-resource management API contract', () => {
     })
 
     await expect(getDomainImportCatalog()).rejects.toThrow(/isActive/)
-    expect(backendApi.get).toHaveBeenCalledWith('/domain-import-catalog')
-  })
-
-  it('updates organization JSON with only revision, schema and config', async () => {
-    vi.mocked(backendApi.put).mockResolvedValue({ data: { data: {} } })
-
-    await updateOrganizationConfig(42, {
-      revision: 5,
-      schemaVersion: 1,
-      config: { buyerTheme: 'green' },
-    })
-
-    expect(backendApi.put).toHaveBeenCalledWith('/organization-configs/42', {
-      revision: 5,
-      schemaVersion: 1,
-      config: { buyerTheme: 'green' },
-    })
-    const body = vi.mocked(backendApi.put).mock.calls[0]?.[1]
-    expect(body).not.toHaveProperty('organizationName')
-    expect(body).not.toHaveProperty('domain')
-  })
-
-  it('creates a reference-only assignment and toggles it with revision', async () => {
-    vi.mocked(backendApi.post).mockResolvedValue({ data: { data: {} } })
-
-    await createAssignment({
-      organizationId: 42,
-      domainId: 8,
-    })
-    await setAssignmentEnabled(11, true, 4)
-
-    expect(backendApi.post).toHaveBeenNthCalledWith(1, '/assignments', {
-      organizationId: 42,
-      domainId: 8,
-    })
-    expect(backendApi.post).toHaveBeenNthCalledWith(
-      2,
-      '/assignments/11/enable',
-      { revision: 4 },
-    )
-  })
-
-  it('uses only the backend-provided qrUrl', async () => {
-    vi.mocked(backendApi.get).mockResolvedValue({
-      data: {
-        data: {
-          items: [
-            {
-              assignmentId: 11,
-              organizationId: 42,
-              domainId: 8,
-              enabled: true,
-              organization: { enabled: true },
-              domain: { enabled: true },
-              revision: 2,
-              qrUrl:
-                'https://whitelabel.example.com/v1/white-label-configs?o=42&d=8',
-            },
-          ],
-          total: 1,
-          page: 1,
-          pageSize: 20,
-        },
-      },
-    })
-
-    const result = await listAssignments()
-    expect(result.items[0]?.qrUrl).toBe(
-      'https://whitelabel.example.com/v1/white-label-configs?o=42&d=8',
-    )
-  })
-
-  it('normalizes the final nested assignment DTO', () => {
-    expect(
-      normalizeAssignment({
-        assignmentId: 11,
-        organizationId: 42,
-        domainId: 8,
-        organization: {
-          organizationName: 'buyer',
-          organizationTitle: '购买方',
-          enabled: true,
-        },
-        domain: {
-          domainId: 8,
-          configKey: 'dev.xrugc.com',
-          description: 'XR UGC Dev',
-          enabled: true,
-        },
-        enabled: true,
-        revision: 2,
-        qrUrl:
-          'https://whitelabel.example.com/v1/white-label-configs?o=42&d=8',
-      }),
-    ).toMatchObject({
-      assignmentId: 11,
-      organizationId: 42,
-      domainId: 8,
-      organizationName: 'buyer',
-      domainConfigKey: 'dev.xrugc.com',
-      domainDescription: 'XR UGC Dev',
-      enabled: true,
-      organizationEnabled: true,
-      domainEnabled: true,
-    })
   })
 })

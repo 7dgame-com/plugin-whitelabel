@@ -124,13 +124,17 @@ const SlotStub = defineComponent({
 })
 
 const JsonEditorStub = defineComponent({
-  props: { modelValue: { type: String, required: true } },
+  props: {
+    modelValue: { type: String, required: true },
+    readOnly: Boolean,
+  },
   emits: ['update:modelValue'],
   setup(props, { emit }) {
     return () =>
       h('textarea', {
         'data-testid': 'json-editor',
         value: props.modelValue,
+        readonly: props.readOnly,
         onInput: (event: Event) =>
           emit(
             'update:modelValue',
@@ -198,7 +202,10 @@ function domainRecord(configKey: string): DomainConfigRecord {
   }
 }
 
-function mountDialog(record: DomainConfigRecord | null = null) {
+function mountDialog(
+  record: DomainConfigRecord | null = null,
+  readOnly = false,
+) {
   const i18n = createI18n({
     legacy: false,
     locale: 'en-US',
@@ -206,7 +213,7 @@ function mountDialog(record: DomainConfigRecord | null = null) {
   })
 
   return mount(DomainConfigDialog, {
-    props: { visible: false, saving: false, record },
+    props: { visible: false, saving: false, record, readOnly },
     global: {
       plugins: [i18n],
       stubs: {
@@ -343,6 +350,28 @@ describe('DomainConfigDialog main-frontend JSON import', () => {
     expect(
       wrapper.get('[data-testid="domain-import-button"]').attributes('disabled'),
     ).toBeDefined()
+
+    wrapper.unmount()
+  })
+
+  it('shows the complete JSON without loading import data in read-only mode', async () => {
+    const wrapper = mountDialog(domainRecord('readonly.example.com'), true)
+
+    await wrapper.setProps({ visible: true })
+    await flushPromises()
+
+    expect(getDomainImportCatalog).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="domain-import-select"]').exists()).toBe(
+      false,
+    )
+    expect(
+      (wrapper.get('[data-testid="json-editor"]').element as HTMLTextAreaElement)
+        .value,
+    ).toContain('readonly.example.com')
+    expect(wrapper.get('[data-testid="json-editor"]').attributes('readonly')).toBe(
+      '',
+    )
+    expect(wrapper.text()).toContain('read-only')
 
     wrapper.unmount()
   })

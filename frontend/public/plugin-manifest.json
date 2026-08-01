@@ -7,9 +7,9 @@
     "en-US": "White-label Configuration"
   },
   "descriptionI18n": {
-    "zh-CN": "独立管理购买方组织、代理方域名及其授权组合",
-    "zh-TW": "獨立管理購買方組織、代理方網域及其授權組合",
-    "en-US": "Manage buyer organizations, agent domains, and authorized assignments"
+    "zh-CN": "按访问域名管理并下发 Unity 白牌 JSON",
+    "zh-TW": "按存取網域管理並下發 Unity 白牌 JSON",
+    "en-US": "Manage and deliver Unity white-label JSON by request domain"
   },
   "group": {
     "id": "management",

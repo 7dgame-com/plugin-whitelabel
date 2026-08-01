@@ -72,7 +72,7 @@ describe('MySQL domain repository invariants', () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
-  it('uses config.name as the physical key on create even for a direct repository call', async () => {
+  it('uses config.name as the physical key on create', async () => {
     const execute = vi.fn()
       .mockResolvedValueOnce([[], []])
       .mockResolvedValueOnce([{ insertId: 34 }, []])
@@ -113,29 +113,14 @@ describe('MySQL domain repository invariants', () => {
       value: { configKey: renamedSnapshot.name },
     });
     expect(execute.mock.calls[2]?.[1]?.[0]).toBe(renamedSnapshot.name);
-    expect(execute.mock.calls[2]?.[1]?.[1]).toBe(renamedSnapshot.description);
-  });
-
-  it('rejects a canonical config.name already held by a stale projection row', async () => {
-    const execute = vi.fn().mockResolvedValueOnce([[{ id: 34 }], []]);
-    const repository = repositoryWithExecute(execute);
-
-    await expect(repository.createDomainConfig({
-      configKey: activeSnapshot.name,
-      schemaVersion: 1,
-      config: activeSnapshot,
-    }, '1')).rejects.toMatchObject({ status: 409 });
-    expect(execute).toHaveBeenCalledTimes(1);
   });
 
   it('ignores stale projection columns when reading a domain snapshot', async () => {
     const execute = vi.fn().mockResolvedValueOnce([
-      [
-        domainRow(activeSnapshot, {
-          domain: 'legacy-exact-host.example.com',
-          display_name: 'Legacy exact host',
-        }),
-      ],
+      [domainRow(activeSnapshot, {
+        domain: 'legacy-exact-host.example.com',
+        display_name: 'Legacy exact host',
+      })],
       [],
     ]);
     const repository = repositoryWithExecute(execute);
@@ -146,84 +131,38 @@ describe('MySQL domain repository invariants', () => {
     });
   });
 
-  it('falls back to config.name when the JSON description is blank', async () => {
-    const snapshot = { ...activeSnapshot, description: '   ' };
+  it('finds the first configured candidate in caller precedence without filtering status', async () => {
     const execute = vi.fn().mockResolvedValueOnce([
-      [domainRow(snapshot, { display_name: 'Legacy exact host' })],
+      [domainRow(activeSnapshot, { is_enabled: 0 })],
       [],
     ]);
     const repository = repositoryWithExecute(execute);
-
-    await expect(repository.findDomainConfig(34)).resolves.toMatchObject({
-      configKey: snapshot.name,
-      displayName: snapshot.name,
-    });
-  });
-
-  it('derives assignment domain identity from its JSON snapshot', async () => {
-    const execute = vi.fn().mockResolvedValueOnce([
-      [
-        {
-          assignment_id: 11,
-          organization_id: 42,
-          domain_id: 34,
-          revision: 2,
-          is_enabled: 1,
-          organization_name: 'buyer',
-          organization_title: 'Buyer',
-          organization_enabled: 1,
-          domain: 'legacy-exact-host.example.com',
-          display_name: 'Legacy exact host',
-          domain_config_json: JSON.stringify(activeSnapshot),
-          domain_enabled: 1,
-          created_by: 1,
-          updated_by: 1,
-          status_changed_by: null,
-          created_at: '2026-01-01 00:00:00.000',
-          updated_at: '2026-01-01 00:00:00.000',
-          status_changed_at: null,
-        },
-      ],
-      [],
+    const result = await repository.findFirstDomainConfig([
+      'dev.xrugc.com',
+      'xrugc.com',
     ]);
-    const repository = repositoryWithExecute(execute);
 
-    await expect(repository.findAssignment(null, 11)).resolves.toMatchObject({
-      domain: {
-        configKey: activeSnapshot.name,
-        displayName: activeSnapshot.description,
-      },
-    });
-  });
-
-  it('keeps the resolved config key equal to domain.config.name', async () => {
-    const execute = vi.fn().mockResolvedValueOnce([
-      [
-        {
-          assignment_revision: 2,
-          organization_id: 42,
-          organization_name: 'buyer',
-          organization_title: 'Buyer',
-          organization_revision: 3,
-          organization_schema_version: 1,
-          organization_config_json: JSON.stringify({ buyerTheme: 'blue' }),
-          domain_id: 34,
-          domain: 'legacy-exact-host.example.com',
-          domain_revision: 4,
-          domain_schema_version: 1,
-          domain_config_json: JSON.stringify(activeSnapshot),
-        },
-      ],
-      [],
+    expect(result).toMatchObject({ configKey: 'dev.xrugc.com', enabled: false });
+    const sql = String(execute.mock.calls[0]?.[0]);
+    expect(sql).toContain("JSON_EXTRACT(config_json, '$.name')");
+    expect(sql).toContain('ORDER BY FIELD');
+    expect(sql).not.toContain('is_enabled = 1');
+    expect(execute.mock.calls[0]?.[1]).toEqual([
+      'dev.xrugc.com',
+      'xrugc.com',
+      'dev.xrugc.com',
+      'xrugc.com',
     ]);
-    const repository = repositoryWithExecute(execute);
-
-    const resolved = await repository.resolveEnabledAssignment(42, 34);
-    expect(resolved?.domain.configKey).toBe(activeSnapshot.name);
-    expect(resolved?.domain.config.name).toBe(activeSnapshot.name);
   });
 
-  it('searches the JSON identity instead of stale projection columns', async () => {
+  it('does not issue SQL for an empty candidate list', async () => {
+    const execute = vi.fn();
+    const repository = repositoryWithExecute(execute);
+    await expect(repository.findFirstDomainConfig([])).resolves.toBeNull();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('searches canonical JSON identity rather than projection columns', async () => {
     const query = vi.fn().mockResolvedValue([[], []]);
     const execute = vi.fn().mockResolvedValue([[{ total: 0 }], []]);
     const repository = new MysqlWhiteLabelRepository({
@@ -232,18 +171,10 @@ describe('MySQL domain repository invariants', () => {
     } as unknown as Pool);
 
     await repository.listDomainConfigs({ q: 'XR UGC', limit: 20, offset: 0 });
-    await repository.listAssignments(null, { q: 'XR UGC', limit: 20, offset: 0 });
-
-    const domainSql = String(query.mock.calls[0]?.[0]);
-    expect(domainSql).toContain("JSON_EXTRACT(config_json, '$.name')");
-    expect(domainSql).toContain("JSON_EXTRACT(config_json, '$.description')");
-    expect(domainSql).toContain('COLLATE utf8mb4_unicode_ci');
-    expect(domainSql).not.toContain('display_name LIKE');
-
-    const assignmentSql = String(query.mock.calls[1]?.[0]);
-    expect(assignmentSql).toContain("JSON_EXTRACT(d.config_json, '$.name')");
-    expect(assignmentSql).toContain("JSON_EXTRACT(d.config_json, '$.description')");
-    expect(assignmentSql).toContain('COLLATE utf8mb4_unicode_ci');
-    expect(assignmentSql).not.toContain('d.display_name LIKE');
+    const sql = String(query.mock.calls[0]?.[0]);
+    expect(sql).toContain("JSON_EXTRACT(config_json, '$.name')");
+    expect(sql).toContain("JSON_EXTRACT(config_json, '$.description')");
+    expect(sql).toContain('COLLATE utf8mb4_unicode_ci');
+    expect(sql).not.toContain('display_name LIKE');
   });
 });

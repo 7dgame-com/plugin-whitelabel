@@ -32,24 +32,6 @@ export interface DomainImportCatalog {
   items: DomainImportCatalogItem[]
 }
 
-export interface OrganizationSummary {
-  id: number
-  name: string
-  title: string
-}
-
-export interface OrganizationConfigRecord {
-  organizationId: number
-  organizationName: string
-  organizationTitle: string
-  schemaVersion: number
-  revision: number
-  config: JsonObject
-  enabled: boolean
-  createdAt?: string
-  updatedAt?: string
-}
-
 export interface DomainConfigRecord {
   domainId: number
   configKey: string
@@ -60,35 +42,6 @@ export interface DomainConfigRecord {
   enabled: boolean
   createdAt?: string
   updatedAt?: string
-}
-
-export interface AssignmentRecord {
-  assignmentId: number
-  organizationId: number
-  domainId: number
-  revision: number
-  enabled: boolean
-  organizationEnabled: boolean
-  domainEnabled: boolean
-  qrUrl: string | null
-  organizationName: string
-  organizationTitle: string
-  domainConfigKey: string
-  domainDescription: string
-  createdAt?: string
-  updatedAt?: string
-}
-
-export interface CreateOrganizationConfigInput {
-  organizationId: number
-  schemaVersion: WhiteLabelSchemaVersion
-  config: JsonObject
-}
-
-export interface UpdateOrganizationConfigInput {
-  revision: number
-  schemaVersion: WhiteLabelSchemaVersion
-  config: JsonObject
 }
 
 export interface CreateDomainConfigInput {
@@ -102,11 +55,6 @@ export interface UpdateDomainConfigInput {
   schemaVersion: WhiteLabelSchemaVersion
   config: StaticDomainConfig
   revision: number
-}
-
-export interface AssignmentInput {
-  organizationId: number
-  domainId: number
 }
 
 export interface ListQuery {

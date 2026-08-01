@@ -4,8 +4,6 @@ import Ajv, {
 } from 'ajv'
 import type { JsonObject, StaticDomainConfig } from './types'
 
-export type JsonSchemaKind = 'organization' | 'domain'
-
 export type JsonValidationIssueCode =
   | 'syntax'
   | 'object-required'
@@ -65,11 +63,6 @@ const SENSITIVE_KEY_FRAGMENTS = [
   'connectionstring',
 ]
 
-const organizationSchema = {
-  type: 'object',
-  additionalProperties: true,
-} as const
-
 /**
  * Mirrors web/public/config/domains/*.json. Nested payloads deliberately stay
  * open so the plugin does not take ownership of the main frontend's settings.
@@ -118,10 +111,7 @@ const domainSchema = {
 } as const
 
 const ajv = new Ajv({ allErrors: true, strict: true })
-const validators: Record<JsonSchemaKind, ValidateFunction> = {
-  organization: ajv.compile(organizationSchema),
-  domain: ajv.compile(domainSchema),
-}
+const domainValidator: ValidateFunction = ajv.compile(domainSchema)
 
 function isJsonObject(value: unknown): value is JsonObject {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -310,9 +300,8 @@ function issueMessage(error: ErrorObject): string {
   return `${path} ${error.message ?? 'does not match the schema'}`
 }
 
-export function validateJsonObjectValue<T extends JsonObject = JsonObject>(
+function validateSecureJsonObject<T extends JsonObject = JsonObject>(
   value: unknown,
-  schema: JsonSchemaKind,
 ): JsonValidationResult<T> {
   if (!isJsonObject(value)) {
     return {
@@ -337,12 +326,20 @@ export function validateJsonObjectValue<T extends JsonObject = JsonObject>(
     }
   }
 
-  const validator = validators[schema]
-  if (!validator(value)) {
+  return { valid: true, value: value as T, issues: [] }
+}
+
+export function validateJsonObjectValue<
+  T extends StaticDomainConfig = StaticDomainConfig,
+>(value: unknown): JsonValidationResult<T> {
+  const secured = validateSecureJsonObject<T>(value)
+  if (!secured.valid) return secured
+
+  if (!domainValidator(secured.value)) {
     return {
       valid: false,
       value: null,
-      issues: (validator.errors ?? []).map((error) => ({
+      issues: (domainValidator.errors ?? []).map((error) => ({
         code: 'schema' as const,
         message: issueMessage(error),
         path: issuePath(error),
@@ -350,67 +347,49 @@ export function validateJsonObjectValue<T extends JsonObject = JsonObject>(
     }
   }
 
-  if (schema === 'domain') {
-    const config = value as StaticDomainConfig
-    const domainIssues: JsonValidationIssue[] = []
-    if (
-      config.description.trim() === '' &&
-      config.name.length > 191
-    ) {
-      domainIssues.push({
-        code: 'schema',
-        message:
-          'description is required when config.name exceeds 191 characters',
-        path: '/description',
-      })
-    }
+  const config = secured.value
+  const domainIssues: JsonValidationIssue[] = []
+  if (config.description.trim() === '' && config.name.length > 191) {
+    domainIssues.push({
+      code: 'schema',
+      message:
+        'description is required when config.name exceeds 191 characters',
+      path: '/description',
+    })
+  }
 
-    const hasDefaultConfig = Object.keys(config.default_config).length > 0
-    const hasLocalizedConfig = Object.values(config.configs).some(
-      (localizedConfig) => Object.keys(localizedConfig).length > 0,
-    )
-    if (
-      config.fallback_domain !== null &&
-      config.fallback_domain !== config.name &&
-      !hasDefaultConfig &&
-      !hasLocalizedConfig
-    ) {
-      domainIssues.push({
-        code: 'schema',
-        message:
-          'an external fallback requires local default_config or configs data; Unity snapshots must be self-contained',
-        path: '/fallback_domain',
-      })
-    }
+  const hasDefaultConfig = Object.keys(config.default_config).length > 0
+  const hasLocalizedConfig = Object.values(config.configs).some(
+    (localizedConfig) => Object.keys(localizedConfig).length > 0,
+  )
+  if (
+    config.fallback_domain !== null &&
+    config.fallback_domain !== config.name &&
+    !hasDefaultConfig &&
+    !hasLocalizedConfig
+  ) {
+    domainIssues.push({
+      code: 'schema',
+      message:
+        'an external fallback requires local default_config or configs data; Unity snapshots must be self-contained',
+      path: '/fallback_domain',
+    })
+  }
 
-    if (domainIssues.length > 0) {
-      return {
-        valid: false,
-        value: null,
-        issues: domainIssues,
-      }
+  if (domainIssues.length > 0) {
+    return {
+      valid: false,
+      value: null,
+      issues: domainIssues,
     }
   }
 
-  return { valid: true, value: value as T, issues: [] }
+  return { valid: true, value: config, issues: [] }
 }
 
 export function validateJsonObjectText(
   text: string,
-  schema: 'domain',
-): JsonValidationResult<StaticDomainConfig>
-export function validateJsonObjectText(
-  text: string,
-  schema: 'organization',
-): JsonValidationResult<JsonObject>
-export function validateJsonObjectText(
-  text: string,
-  schema: JsonSchemaKind,
-): JsonValidationResult
-export function validateJsonObjectText(
-  text: string,
-  schema: JsonSchemaKind,
-): JsonValidationResult {
+): JsonValidationResult<StaticDomainConfig> {
   let parsed: unknown
   try {
     parsed = JSON.parse(text) as unknown
@@ -429,16 +408,22 @@ export function validateJsonObjectText(
     }
   }
 
-  return validateJsonObjectValue(parsed, schema)
+  return validateJsonObjectValue(parsed)
 }
 
 export function formatJsonObjectText(
   text: string,
   compact = false,
 ): string | null {
-  const parsed = validateJsonObjectText(text, 'organization')
-  return parsed.valid
-    ? JSON.stringify(parsed.value, null, compact ? 0 : 2)
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text) as unknown
+  } catch {
+    return null
+  }
+  const secured = validateSecureJsonObject(parsed)
+  return secured.valid
+    ? JSON.stringify(secured.value, null, compact ? 0 : 2)
     : null
 }
 
