@@ -143,26 +143,17 @@ If-None-Match: "<previous-etag>"
 - 拒绝 scheme、路径、query、fragment、端口、userinfo、通配符和空 label；
 - 不接受 `organizationId`、`o`、数字 `d`、loginKey 或上游 URL。
 
-成功响应不使用 `code/data` 包装，也不返回内部 `domainId`：
+成功响应直接就是匹配到的配置 JSON，不使用 `code/data` 包装，也不返回内部
+`domainId`：
 
 ```json
 {
-  "version": 1,
-  "domain": {
-    "requestedDomain": "d.dev.xrugc.com",
-    "configKey": "dev.xrugc.com",
-    "isDomainFallback": true,
-    "revision": 5,
-    "schemaVersion": 1,
-    "config": {
-      "name": "dev.xrugc.com",
-      "description": "XR UGC Dev",
-      "is_active": true,
-      "fallback_domain": "default",
-      "default_config": {},
-      "configs": {}
-    }
-  }
+  "name": "dev.xrugc.com",
+  "description": "XR UGC Dev",
+  "is_active": true,
+  "fallback_domain": "default",
+  "default_config": {},
+  "configs": {}
 }
 ```
 
@@ -175,14 +166,21 @@ Cache-Control: public, no-cache, must-revalidate
 
 客户端和中间缓存可以保存响应，但每次应用前都必须携带 `If-None-Match` 重验证；命中
 返回 304。这样 root 停用记录后不会继续使用尚在 freshness 窗口内的旧品牌。
-`isDomainFallback` 表示实际配置键与规范化后的完整域名不同，不表示语言 fallback。
+匹配顺序固定为完整域名到父域名。例如 `d.dev.xrugc.com` 依次查找：
 
-以下情况统一返回 404：
+```text
+d.dev.xrugc.com -> dev.xrugc.com -> xrugc.com -> {}
+```
+
+以下情况返回 HTTP 200 和空 JSON `{}`：
+
+- 所有域名候选均不存在；
+- 候选顺序中的第一条现有记录被停用；
+- `config.is_active=false`。
+
+以下非法请求统一返回 404：
 
 - 参数缺失、额外、非法；
-- 没有任何候选记录和可用 default；
-- 候选顺序中的第一条现有记录被停用；
-- `config.is_active=false`；
 - 旧版 `?o=<id>&d=<id>` 请求。
 
 公开接口不读取登录身份或组织。登录成功与白牌解析成功是两个独立结果。
@@ -213,5 +211,5 @@ Cache-Control: public, no-cache, must-revalidate
 }
 ```
 
-公开 resolver 对不存在、停用和非法输入统一使用普通 404，避免暴露域名目录和启停
-状态。
+公开 resolver 对不存在和停用统一返回 `{}`；只有参数缺失、额外或非法时返回普通
+404。

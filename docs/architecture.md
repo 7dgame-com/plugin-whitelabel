@@ -12,7 +12,7 @@
 3. 主前端和主后端只传递必要的 hostname 与服务地址，不理解配置键匹配、JSON Schema
    或白牌启停规则；
 4. 白牌插件自行管理快照、匹配、校验、缓存和审计；
-5. 对未知、非法或明确停用的域名失败关闭，避免套用错误品牌。
+5. 对未知或明确停用的域名返回空 JSON，对非法输入拒绝请求，避免套用错误品牌。
 
 ## 2. 组件关系
 
@@ -124,26 +124,24 @@ flowchart LR
 4. 校验总长度与每个 DNS label；
 5. 拒绝 scheme、路径、查询、fragment、端口、userinfo、通配符和空 label。
 
-候选顺序与主前端 `domain-static-config.ts` 保持一致：
+候选顺序采用主前端域名键的父域关系，但完整域名始终优先：
 
 ```text
 d.dev.xrugc.com
-  1. dev.xrugc.com
-  2. xrugc.com
-  3. d.dev.xrugc.com
+  1. d.dev.xrugc.com
+  2. dev.xrugc.com
+  3. xrugc.com
 ```
 
-`www.` 也会先去前缀并逐级尝试父域名。候选按首次出现去重，数据库只做参数化精确
-匹配，不使用 `LIKE` 或无边界后缀匹配。
+`d.` 和 `www.` 都按普通子域处理，不会被特殊提前剥离。数据库只做参数化精确匹配，
+不使用 `LIKE` 或无边界后缀匹配。
 
 解析规则：
 
 - 取候选顺序中第一条“存在的”记录；
 - 该记录只有在 `is_enabled = 1` 且 `config.is_active = true` 时返回；
-- 首条记录存在但停用时立即 404，不继续回退；
-- 所有非 default 候选均不存在时，可尝试配置键 `default`；
-- `default` 也必须由 root 显式保存并启用；
-- 没有可用结果时统一 404。
+- 首条记录存在但停用时返回 `{}`，不继续回退；
+- 所有候选均不存在时返回 `{}`，不尝试 `default` 配置键。
 
 这让停用操作成为可靠的品牌熔断，同时保留主前端现有的域名族语义。
 
@@ -168,23 +166,20 @@ d.dev.xrugc.com
 
 ```json
 {
-  "version": 1,
-  "domain": {
-    "requestedDomain": "d.dev.xrugc.com",
-    "configKey": "dev.xrugc.com",
-    "isDomainFallback": true,
-    "revision": 5,
-    "schemaVersion": 1,
-    "config": {}
-  }
+  "name": "dev.xrugc.com",
+  "description": "XR UGC Dev",
+  "is_active": true,
+  "fallback_domain": "default",
+  "default_config": {},
+  "configs": {}
 }
 ```
 
-- ETag 必须随实际响应内容及域名 revision 变化；
+- ETag 随实际响应 JSON 变化；
 - 响应允许缓存供 ETag 复用，但使用 `no-cache, must-revalidate` 要求每次应用前重新
   验证；`If-None-Match` 命中返回 304，停用不会被旧 freshness 窗口延迟；
-- 非法、未知、停用统一 404，不暴露匹配过程；
+- 未知、停用返回 `{}`；非法参数返回 404；
 - 主后端故障时管理请求失败关闭，但公开解析不受影响；
-- Unity 成功后保存 ETag 和 last-known-good；网络错误优先使用 last-known-good，404
-  使用内置默认配置；
+- Unity 成功后保存 ETag 和 last-known-good；网络错误优先使用 last-known-good，空
+  JSON 使用内置默认配置；
 - 白牌失败不能改变登录成功与否。

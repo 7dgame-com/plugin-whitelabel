@@ -9,9 +9,10 @@
 
 **访问域名 → 配置键 → Unity 白牌 JSON**
 
-客户端提供当前完整 hostname，例如 `d.dev.xrugc.com`。插件后端使用与主前端静态
-域名加载器一致的确定性候选规则，命中 `dev.xrugc.com` 配置键，并返回该记录保存的
-一份完整 `StaticDomainConfig` JSON 快照。管理端不保存登录关系、用户范围或组合关系。
+客户端提供当前完整 hostname，例如 `d.dev.xrugc.com`。插件后端先精确查找完整域名，
+再依次查找 `dev.xrugc.com`、`xrugc.com`，并直接返回第一条可用记录保存的完整
+`StaticDomainConfig` JSON 快照；全部不存在时返回 `{}`。管理端不保存登录关系、用户
+范围或组合关系。
 
 `config.name` 是配置键，不要求等于请求中的完整 hostname；`config.description` 是
 管理列表说明。插件内部数字 `domainId` 仅用于管理 API，不作为公开解析输入。
@@ -101,8 +102,9 @@ JSON 编辑器提供语法高亮、行号、搜索、撤销、格式化、压缩
 GET https://whitelabel.example.com/v1/white-label-configs?domain=d.dev.xrugc.com
 ```
 
-插件后端负责规范化 hostname、选择唯一配置键并返回 Unity JSON。管理前端不生成、
-拼接或缓存公开解析地址。
+插件后端负责规范化 hostname，按完整域名到父域名的顺序选择配置键并直接返回 Unity
+JSON。`d.`、`www.` 不做特殊处理，也不使用 `default` 兜底。管理前端不生成、拼接或
+缓存公开解析地址。
 
 ## Docker
 

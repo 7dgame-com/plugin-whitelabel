@@ -164,34 +164,27 @@ const requestedDomainTextSchema = z
 
 export const requestedDomainSchema = requestedDomainTextSchema.pipe(domainConfigKeySchema);
 
-/** Mirrors the main frontend's exact domain candidate precedence. */
+/**
+ * Resolves a hostname exactly as a domain-key hierarchy: the complete hostname
+ * first, then each registrable-looking parent. The final single-label TLD is
+ * never treated as a configuration key.
+ */
 export function domainConfigCandidates(domain: string): string[] {
   const candidates: string[] = [];
-  const addDomainAndParents = (domainName: string): void => {
-    let candidate = domainName;
-    while (candidate) {
-      candidates.push(candidate);
-      const nextDot = candidate.indexOf('.');
-      if (nextDot < 0) {
-        break;
-      }
-      const nextCandidate = candidate.slice(nextDot + 1);
-      if (!nextCandidate.includes('.')) {
-        break;
-      }
-      candidate = nextCandidate;
+  let candidate = domain;
+  while (candidate) {
+    candidates.push(candidate);
+    const nextDot = candidate.indexOf('.');
+    if (nextDot < 0) {
+      break;
     }
-  };
-
-  const publicDomain = domain.startsWith('www.') ? domain.slice(4) : domain;
-  if (publicDomain.startsWith('d.')) {
-    addDomainAndParents(publicDomain.slice(2));
+    const parent = candidate.slice(nextDot + 1);
+    if (!parent.includes('.')) {
+      break;
+    }
+    candidate = parent;
   }
-  if (domain.startsWith('www.')) {
-    addDomainAndParents(domain.slice(4));
-  }
-  addDomainAndParents(domain);
-  return [...new Set(candidates.filter(Boolean))];
+  return candidates;
 }
 
 export const positiveIdSchema = z.coerce

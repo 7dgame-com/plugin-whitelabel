@@ -204,17 +204,21 @@ describe('public hostname validation and candidate generation', () => {
     expect(requestedDomainSchema.safeParse(input).success).toBe(false);
   });
 
-  it('keeps the main frontend d/www/parent precedence and removes duplicates', () => {
+  it('tries the exact hostname and then each parent domain', () => {
     expect(domainConfigCandidates('www.d.dev.xrugc.com')).toEqual([
+      'www.d.dev.xrugc.com',
+      'd.dev.xrugc.com',
       'dev.xrugc.com',
       'xrugc.com',
-      'd.dev.xrugc.com',
-      'www.d.dev.xrugc.com',
     ]);
     expect(domainConfigCandidates('d.dev.xrugc.com')).toEqual([
+      'd.dev.xrugc.com',
       'dev.xrugc.com',
       'xrugc.com',
-      'd.dev.xrugc.com',
+    ]);
+    expect(domainConfigCandidates('dev.xrugc.com')).toEqual([
+      'dev.xrugc.com',
+      'xrugc.com',
     ]);
   });
 

@@ -4,8 +4,8 @@
 hostname 决定，与用户、账号、组织和登录方式无关。
 
 插件只保存一类数据：与主前端 `StaticDomainConfig` 同结构的域名 JSON 快照。请求
-`d.dev.xrugc.com` 时，插件按主前端既有候选规则找到 `dev.xrugc.com` 配置键，并返回
-这一份 JSON。
+`d.dev.xrugc.com` 时，插件依次查找 `d.dev.xrugc.com`、`dev.xrugc.com`、
+`xrugc.com`，返回第一条存在且可用的 JSON。
 
 ## 最终边界
 
@@ -46,20 +46,20 @@ Unity
 - `config_json` 是完整、自包含的 `StaticDomainConfig` 快照；
 - root 可从主前端 `/config/domains/manifest.json` 选择并复制一项，保存后与主前端
   文件独立，不会自动同步；
-- 运行时对 hostname 做小写和 IDN ASCII 规范化，再按主前端相同的 `d.`、`www.` 和
-  父域名顺序匹配；
-- 只有在所有域名候选都没有数据库记录时，才可命中显式存在且启用的 `default`；
-- 如果更具体的首条记录存在但被停用，直接返回 404，不越过它套用其他品牌；
+- 运行时对 hostname 做小写和 IDN ASCII 规范化，再按“完整域名优先、逐级父域”的
+  顺序匹配；`d.` 和 `www.` 都是普通子域，不做特殊跳过；
+- 如果第一条存在的记录被停用，则返回空 JSON，不越过它套用父域品牌；
+- 所有候选都不存在时返回空 JSON `{}`，不使用 `default` 配置键；
 - `fallback_domain` 只是已物化快照的格式元数据，运行时不递归读取其他文件。
 
 例如：
 
 ```text
 d.dev.xrugc.com
+  -> d.dev.xrugc.com
   -> dev.xrugc.com
   -> xrugc.com
-  -> d.dev.xrugc.com
-  -> default（仅前面完全没有记录时）
+  -> {}（均不存在时）
 ```
 
 ## 权限
@@ -82,27 +82,17 @@ GET /v1/white-label-configs?domain=d.dev.xrugc.com
 
 ```json
 {
-  "version": 1,
-  "domain": {
-    "requestedDomain": "d.dev.xrugc.com",
-    "configKey": "dev.xrugc.com",
-    "isDomainFallback": true,
-    "revision": 5,
-    "schemaVersion": 1,
-    "config": {
-      "name": "dev.xrugc.com",
-      "description": "XR UGC Dev",
-      "is_active": true,
-      "fallback_domain": "default",
-      "default_config": {},
-      "configs": {}
-    }
-  }
+  "name": "dev.xrugc.com",
+  "description": "XR UGC Dev",
+  "is_active": true,
+  "fallback_domain": "default",
+  "default_config": {},
+  "configs": {}
 }
 ```
 
-`domainId` 只供管理 API 和数据库内部使用，不进入 Unity 协议。旧的 `o`、`d` 参数不
-再接受。
+公开接口只接收 `domain` 并直接返回配置 JSON，不接收或返回 `domainId`。旧的 `o`、
+数字 `d` 参数不再接受。
 
 详细设计：
 

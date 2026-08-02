@@ -103,19 +103,9 @@ describe('domain-only white-label backend', () => {
       .query({ domain: 'dev.xrugc.com' });
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({
-      version: 1,
-      domain: {
-        requestedDomain: 'dev.xrugc.com',
-        configKey: 'dev.xrugc.com',
-        isDomainFallback: false,
-        revision: 3,
-        schemaVersion: 1,
-        config: domainSnapshot(),
-      },
-    });
+    expect(response.body).toEqual(domainSnapshot());
     expect(response.body).not.toHaveProperty('organization');
-    expect(response.body.domain).not.toHaveProperty('id');
+    expect(response.body).not.toHaveProperty('domainId');
     expect(response.headers['cache-control']).toBe(
       'public, no-cache, must-revalidate',
     );
@@ -125,7 +115,7 @@ describe('domain-only white-label backend', () => {
     ]);
   });
 
-  it('uses the same d/www/parent precedence as the main frontend', async () => {
+  it('uses exact-hostname-first parent-domain precedence', async () => {
     const matched = domain({
       configKey: 'dev.xrugc.com',
       config: domainSnapshot(),
@@ -136,16 +126,12 @@ describe('domain-only white-label backend', () => {
       .query({ domain: 'WWW.D.dev.xrugc.com.' });
 
     expect(response.status).toBe(200);
-    expect(response.body.domain).toMatchObject({
-      requestedDomain: 'www.d.dev.xrugc.com',
-      configKey: 'dev.xrugc.com',
-      isDomainFallback: true,
-    });
+    expect(response.body).toEqual(domainSnapshot());
     expect(findFirstDomainConfig).toHaveBeenCalledWith([
+      'www.d.dev.xrugc.com',
+      'd.dev.xrugc.com',
       'dev.xrugc.com',
       'xrugc.com',
-      'd.dev.xrugc.com',
-      'www.d.dev.xrugc.com',
     ]);
   });
 
@@ -160,31 +146,20 @@ describe('domain-only white-label backend', () => {
       .query({ domain: 'BÜCHER.example.' });
 
     expect(response.status).toBe(200);
-    expect(response.body.domain.requestedDomain).toBe('xn--bcher-kva.example');
+    expect(response.body.name).toBe('xn--bcher-kva.example');
     expect(findFirstDomainConfig).toHaveBeenCalledWith(['xn--bcher-kva.example']);
   });
 
-  it('uses an explicitly configured default only after no non-default record exists', async () => {
-    const fallback = domain({
-      configKey: 'default',
-      config: domainSnapshot({ name: 'default', fallback_domain: null }),
-    });
-    const findFirstDomainConfig = vi.fn()
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(fallback);
+  it('returns an empty JSON object when no domain or parent key exists', async () => {
+    const findFirstDomainConfig = vi.fn().mockResolvedValue(null);
     const response = await request(app(repository({ findFirstDomainConfig })))
       .get('/v1/white-label-configs')
       .query({ domain: 'missing.example.com' });
 
     expect(response.status).toBe(200);
-    expect(response.body.domain).toMatchObject({
-      requestedDomain: 'missing.example.com',
-      configKey: 'default',
-      isDomainFallback: true,
-    });
+    expect(response.body).toEqual({});
     expect(findFirstDomainConfig.mock.calls).toEqual([
       [['missing.example.com', 'example.com']],
-      [['default']],
     ]);
   });
 
@@ -194,13 +169,14 @@ describe('domain-only white-label backend', () => {
       enabled: true,
       config: domainSnapshot({ is_active: false }),
     }],
-  ])('does not continue fallback after a %s higher-priority match', async (_name, overrides) => {
+  ])('returns empty without parent fallback after a %s higher-priority match', async (_name, overrides) => {
     const findFirstDomainConfig = vi.fn().mockResolvedValue(domain(overrides));
     const response = await request(app(repository({ findFirstDomainConfig })))
       .get('/v1/white-label-configs')
       .query({ domain: 'd.dev.xrugc.com' });
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({});
     expect(findFirstDomainConfig).toHaveBeenCalledTimes(1);
   });
 
@@ -236,7 +212,7 @@ describe('domain-only white-label backend', () => {
     expect(cached.text).toBe('');
   });
 
-  it('returns 404 instead of 304 when a domain is disabled after an ETag was issued', async () => {
+  it('returns a fresh empty JSON response when a domain is disabled after an ETag was issued', async () => {
     const findFirstDomainConfig = vi.fn()
       .mockResolvedValueOnce(domain())
       .mockResolvedValueOnce(domain({ enabled: false }));
@@ -248,7 +224,9 @@ describe('domain-only white-label backend', () => {
     const disabled = await request(service)
       .get('/v1/white-label-configs?domain=dev.xrugc.com')
       .set('If-None-Match', first.headers.etag as string);
-    expect(disabled.status).toBe(404);
+    expect(disabled.status).toBe(200);
+    expect(disabled.body).toEqual({});
+    expect(disabled.headers.etag).not.toBe(first.headers.etag);
   });
 
   it('allows admin and root to read domains but reserves every mutation for root', async () => {

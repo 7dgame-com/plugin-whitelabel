@@ -141,10 +141,10 @@ hkccr.ccs.tencentyun.com/plugins/plugin-whitelabel-backend
 - admin 能查看列表和完整 JSON，但没有任何写入口，直接写 API 返回 403；
 - user / manager 无法进入插件；
 - 管理界面不再出现组织、assignment、二维码或 `o/d`；
-- `d.dev.xrugc.com` 按规定候选顺序命中 `dev.xrugc.com`；
+- `d.dev.xrugc.com` 依次匹配自身、`dev.xrugc.com`、`xrugc.com`；
 - 大小写、尾点和 IDN 规范化正确；scheme、路径、端口、userinfo 被拒绝；
-- 第一条存在但停用的记录阻断父域名/default 回退；
-- 未知域名只在所有候选不存在时使用显式启用的 `default`；
+- 第一条存在但停用的记录阻断父域名回退并返回 `{}`；
+- 未知域名在所有候选不存在时返回 `{}`，不使用 `default`；
 - 响应不含组织、assignment 或公开 `domainId`；
 - ETag 命中返回 304；
 - 主后端不可用时管理失败关闭，公开解析仍可工作；

@@ -51,8 +51,8 @@ web_<loginKey>
 GET <configurationUrl>?domain=<frontendDomain>
 ```
 
-白牌插件只接收 `domain`，自行决定 `configKey` 并返回一份 JSON。组织数组绝不能转发
-给插件，也不能影响匹配结果。
+白牌插件只接收 `domain`，按完整域名到父域名的顺序选择配置键并直接返回配置 JSON；
+没有配置时返回 `{}`。组织数组绝不能转发给插件，也不能影响匹配结果。
 
 ## 3. 建议时序
 
@@ -116,7 +116,7 @@ login-context:v1:<sha256(loginKey)>
 | 旧 Unity | 只执行原登录，完全忽略上下文 |
 | 新 Unity，上下文成功 | 登录后继续读取域名白牌 |
 | 上下文缺失/过期 | 登录结果不受影响，使用内置或 last-known-good 白牌 |
-| 白牌 404 | 使用内置默认白牌，不回退到其他组织 |
+| 白牌返回 `{}` | 使用内置默认白牌，不回退到其他组织 |
 | 白牌网络错误 | 优先使用 last-known-good |
 | 白牌成功 | 校验 Schema，原子应用并缓存 ETag |
 

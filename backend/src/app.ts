@@ -21,6 +21,7 @@ import type {
   AuthenticatedSession,
   DomainConfig,
   DomainConfigInput,
+  JsonObject,
   SessionVerifier,
   VersionedMutationResult,
   WhiteLabelRepository,
@@ -47,17 +48,7 @@ interface ManagementContext {
   isRoot: boolean;
 }
 
-interface PublicWhiteLabelResponse {
-  version: 1;
-  domain: {
-    requestedDomain: string;
-    configKey: string;
-    isDomainFallback: boolean;
-    revision: number;
-    schemaVersion: number;
-    config: DomainConfig['config'];
-  };
-}
+type PublicWhiteLabelResponse = DomainConfig['config'] | JsonObject;
 
 type AsyncRequestHandler = (
   request: Request,
@@ -114,20 +105,6 @@ function listResponse<Value>(
   return {
     code: 0,
     data: { items, total, page, pageSize },
-  };
-}
-
-function publicResponse(requestedDomain: string, record: DomainConfig): PublicWhiteLabelResponse {
-  return {
-    version: 1,
-    domain: {
-      requestedDomain,
-      configKey: record.configKey,
-      isDomainFallback: record.configKey !== requestedDomain,
-      revision: record.revision,
-      schemaVersion: record.schemaVersion,
-      config: record.config,
-    },
   };
 }
 
@@ -304,16 +281,14 @@ function createPublicResolverRouter(repository: WhiteLabelRepository): express.R
 
     const candidates = domainConfigCandidates(query.data.domain)
       .filter((candidate) => candidate !== 'default');
-    let record = await repository.findFirstDomainConfig(candidates);
-    if (!record) {
-      record = await repository.findFirstDomainConfig(['default']);
-    }
+    const record = await repository.findFirstDomainConfig(candidates);
     // A configured higher-priority match is authoritative. Disabled records
-    // deliberately block parent/default fallback instead of being skipped.
+    // deliberately block parent fallback instead of being skipped.
     if (!record || !record.enabled || !record.config.is_active) {
-      throw notFound();
+      sendPublicConfig(request, response, {});
+      return;
     }
-    sendPublicConfig(request, response, publicResponse(query.data.domain, record));
+    sendPublicConfig(request, response, record.config);
   }));
 
   return router;
