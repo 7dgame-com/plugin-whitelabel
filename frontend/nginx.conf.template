@@ -19,29 +19,53 @@ server {
         proxy_pass ${APP_API_1_URL};
         proxy_http_version 1.1;
         proxy_ssl_server_name on;
-        proxy_set_header Host $proxy_host;
+        proxy_ssl_name ${APP_API_1_HOST};
+        proxy_set_header Host ${APP_API_1_HOST};
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_connect_timeout 5s;
         proxy_read_timeout 30s;
+# __API_PRIMARY_FAILOVER__
     }
 
-    # Only the browser-facing management API is proxied. Every other backend
-    # path is denied. The public resolver is routed directly to the backend by
-    # the deployment proxy and never passes through this management frontend.
+# __API_FAILOVER_LOCATION__
+
+    # Only the browser-facing management API is proxied under /backend. Every
+    # other /backend path is denied. The public resolver has one separate exact
+    # route so production can fail over between two independent API hosts.
     location ^~ /backend/api/ {
         rewrite ^/backend/(.*)$ /$1 break;
         proxy_pass ${APP_BACKEND_1_URL};
         proxy_http_version 1.1;
         proxy_ssl_server_name on;
-        proxy_set_header Host $proxy_host;
+        proxy_ssl_name ${APP_BACKEND_1_HOST};
+        proxy_set_header Host ${APP_BACKEND_1_HOST};
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_connect_timeout 5s;
         proxy_read_timeout 30s;
+# __BACKEND_PRIMARY_FAILOVER__
     }
+
+    # Unity uses the same stable public origin as the management frontend. Only
+    # this exact unauthenticated resolver path is forwarded to the plugin API.
+    location = /v1/white-label-configs {
+        proxy_pass ${APP_BACKEND_1_URL};
+        proxy_http_version 1.1;
+        proxy_ssl_server_name on;
+        proxy_ssl_name ${APP_BACKEND_1_HOST};
+        proxy_set_header Host ${APP_BACKEND_1_HOST};
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 30s;
+# __BACKEND_PRIMARY_FAILOVER__
+    }
+
+# __BACKEND_FAILOVER_LOCATION__
 
     location ^~ /backend/ {
         return 404;

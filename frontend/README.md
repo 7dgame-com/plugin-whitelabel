@@ -112,12 +112,15 @@ JSON。`d.`、`www.` 不做特殊处理，也不使用 `default` 兜底。管理
 docker build -f frontend/Dockerfile -t plugin-whitelabel-frontend .
 docker run --rm -p 3012:80 \
   -e APP_API_1_URL=http://api:80 \
+  -e APP_API_2_URL=https://api-backup.example.com \
   -e APP_BACKEND_1_URL=http://plugin-whitelabel-backend:8093 \
+  -e APP_BACKEND_2_URL=https://whitelabel-api-backup.example.com \
   plugin-whitelabel-frontend
 ```
 
-运行时 nginx 只提供 `/api` 与 `/backend/api/*` 两个同源代理，以及 `GET /health`
-健康检查。
+运行时 nginx 提供 `/api/*`、`/backend/api/*`、精确的
+`/v1/white-label-configs` 和 `GET /health`。配置第二个 origin 时，502/503/504 会自动
+切换到备用服务；其他 `/backend/*` 始终返回 404。
 
 生产静态目录可参考 [`plugins.json.example`](./plugins.json.example)；通过
 system-admin 写 API 动态登记时，应使用仓库根目录的 snake_case 注册示例，并保持

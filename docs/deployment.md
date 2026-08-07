@@ -12,8 +12,8 @@
 
 | 组件 | 变量 | 说明 |
 |---|---|---|
-| frontend | `APP_API_1_URL` | 主后端地址，用于 verify-token |
-| frontend | `APP_BACKEND_1_URL` | 插件后端内部地址 |
+| frontend | `APP_API_1_URL` / `APP_API_2_URL` | 主后端主备地址，用于 verify-token |
+| frontend | `APP_BACKEND_1_URL` / `APP_BACKEND_2_URL` | 插件后端主备 origin |
 | backend | `MAIN_API_BASE_URL` | 主后端固定 base URL |
 | backend | `MAIN_API_TIMEOUT_MS` | 管理鉴权超时 |
 | backend | `MAIN_FRONTEND_PUBLIC_BASE_URL` | 可选；root 导入使用的主前端纯 origin |
@@ -32,7 +32,7 @@
 /backend/api/*  -> 插件后端管理 API
 ```
 
-公开入口只向插件后端暴露：
+开发环境可由入口代理直接暴露插件后端。生产环境由管理前端仅代理这一条精确公开路由：
 
 ```http
 GET /v1/white-label-configs?domain=<hostname>
@@ -41,9 +41,39 @@ GET /v1/white-label-configs?domain=<hostname>
 建议对该路径限流并保留 ETag。不要把插件后端的整个 `/api/v1/*` 直接暴露给公网；管理
 接口仍必须经过 Bearer token 校验。MySQL 只在内部网络开放。
 
-公开 resolver 直接访问插件后端，不经过主前端、主后端或 `yii3-a1`。
+公开 resolver 不经过主前端业务代码、主后端或 `yii3-a1`。生产入口 nginx 只负责把该
+精确路径转发到两个插件后端，并在 502/503/504 时从 xrteeth 切换到 tmrpp；管理 API
+继续只允许 `/backend/api/*`。
 
-## 3. 主前端注册
+## 3. 生产拓扑
+
+```text
+port.7dgame.com
+  └─ plugin-whitelabel-frontend:publish
+       ├─ /api/*                    -> api.xrteeth.com -> api.tmrpp.com
+       ├─ /backend/api/*            -> 插件后端 xrteeth -> tmrpp
+       └─ /v1/white-label-configs   -> 插件后端 xrteeth -> tmrpp
+
+port.xrteeth.com / port.tmrpp.com
+  └─ plugin-whitelabel-backend:publish
+       └─ 同一个专用 whitelabel MySQL database/schema
+```
+
+生产编排模板：
+
+- `deploy/frontend.production.yml` 部署到 `port.7dgame.com`；
+- `deploy/backend.production.yml` 分别部署到 xrteeth 与 tmrpp；
+- 两个后端的 `MAIN_API_BASE_URL` 分别使用本机对应的 `api.xrteeth.com` 和
+  `api.tmrpp.com`；
+- 两个后端必须使用同一组 `WHITELABEL_DB_*`，数据库必须先执行
+  `backend/db/schema.sql`；
+- 不允许复用主业务库账号，也不允许两个后端各自维护一份本地数据库。
+
+后端公开 host 应为两个独立 origin，再作为前端的 `WHITELABEL_BACKEND_1_URL` 和
+`WHITELABEL_BACKEND_2_URL`。数据库密码只放在 Portainer stack environment 中，不写入
+Compose 或仓库。
+
+## 4. 主前端注册
 
 `system-admin-registration.example.json` 使用 snake_case：
 
@@ -57,7 +87,7 @@ GET /v1/white-label-configs?domain=<hostname>
 
 无需修改主前端 PluginSystem 或动态路由。
 
-## 4. 主前端 manifest 边界
+## 5. 主前端 manifest 边界
 
 插件域名 JSON 与主前端 `web/public/config/domains/{configKey}.json` 使用同一数据结构
 和配置键语义，但保存后是两份独立数据：
@@ -68,7 +98,7 @@ GET /v1/white-label-configs?domain=<hostname>
 - manifest 不可用不会影响已有配置解析；
 - 若新键也要影响主前端本身，仍需在主前端仓库单独增加 JSON 并发布。
 
-## 5. 数据库初始化与旧数据
+## 6. 数据库初始化与旧数据
 
 新安装应用：
 
@@ -98,7 +128,7 @@ backend/db/schema.sql
 
 本仓库不自动把组织 JSON 合并进域名 JSON，也不执行破坏性 DDL。
 
-## 6. 登录上下文接入
+## 7. 登录上下文接入
 
 白牌插件部署只需提供公开 resolver URL，例如：
 
@@ -110,7 +140,7 @@ https://whitelabel-d.plugins.xrugc.com/v1/white-label-configs
 插件本身不连接该 Redis、不读取 loginKey，也不关心上下文中的组织。详细契约见
 [登录上下文与 Unity 接入](login-context-integration.md)。
 
-## 7. CI/CD
+## 8. CI/CD
 
 分支与镜像 tag：
 
@@ -132,10 +162,7 @@ hkccr.ccs.tencentyun.com/plugins/plugin-whitelabel-frontend
 hkccr.ccs.tencentyun.com/plugins/plugin-whitelabel-backend
 ```
 
-当前工作只可推送 `develop` tag 并部署开发栈。不得触发 main、publish、latest 或修改
-生产栈。
-
-## 8. 开发环境验收
+## 9. 开发环境验收
 
 - root 能查看、创建、编辑、启停和导入域名配置；
 - admin 能查看列表和完整 JSON，但没有任何写入口，直接写 API 返回 403；
