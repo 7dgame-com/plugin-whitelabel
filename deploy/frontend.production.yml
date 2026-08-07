@@ -1,0 +1,23 @@
+services:
+  plugin-whitelabel-frontend:
+    image: hkccr.ccs.tencentyun.com/plugins/plugin-whitelabel-frontend:publish
+    restart: unless-stopped
+    environment:
+      APP_API_1_URL: https://api.xrteeth.com
+      APP_API_2_URL: https://api.tmrpp.com
+      APP_BACKEND_1_URL: ${WHITELABEL_BACKEND_1_URL:?set WHITELABEL_BACKEND_1_URL}
+      APP_BACKEND_2_URL: ${WHITELABEL_BACKEND_2_URL:?set WHITELABEL_BACKEND_2_URL}
+    networks:
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.plugin-whitelabel.rule=Host(`whitelabel.plugins.xrugc.com`)"
+      - "traefik.http.routers.plugin-whitelabel.entrypoints=websecure"
+      - "traefik.http.routers.plugin-whitelabel.tls=true"
+      - "traefik.http.routers.plugin-whitelabel.tls.certresolver=letsencrypt"
+      - "traefik.http.services.plugin-whitelabel.loadbalancer.server.port=80"
+
+networks:
+  proxy:
+    external: true
