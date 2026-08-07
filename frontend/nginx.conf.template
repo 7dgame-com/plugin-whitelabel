@@ -28,7 +28,8 @@ server {
     }
 
     # Only the browser-facing management API is proxied. Every other backend
-    # path, including case variants of the A1-only internal resolver, is denied.
+    # path is denied. The public resolver is routed directly to the backend by
+    # the deployment proxy and never passes through this management frontend.
     location ^~ /backend/api/ {
         rewrite ^/backend/(.*)$ /$1 break;
         proxy_pass ${APP_BACKEND_1_URL};

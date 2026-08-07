@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   configJsonSchema,
-  hostnameSchema,
+  createDomainConfigSchema,
+  domainConfigCandidates,
+  domainConfigKeySchema,
+  requestedDomainSchema,
+  resolveQuerySchema,
+  staticDomainConfigSchema,
+  updateDomainConfigSchema,
 } from '../src/validation';
 
 describe('white-label JSON validation', () => {
@@ -51,10 +57,177 @@ describe('white-label JSON validation', () => {
   });
 });
 
-describe('hostname validation', () => {
-  it('requires at least two hostname labels', () => {
-    expect(hostnameSchema.safeParse('localhost').success).toBe(false);
-    expect(hostnameSchema.safeParse('example.com').success).toBe(true);
-    expect(hostnameSchema.safeParse('代理.example.com').success).toBe(false);
+describe('main-frontend domain config validation', () => {
+  const snapshot = {
+    name: 'dev.xrugc.com',
+    description: 'XR UGC Dev',
+    is_active: true,
+    fallback_domain: 'xrugc.com',
+    default_config: { icon: 'https://cdn.example/icon.webp' },
+    configs: {
+      'zh-CN': { title: 'XR UGC Dev' },
+    },
+  };
+
+  it.each([
+    'DEV.XRUGC.COM',
+    'https://dev.xrugc.com',
+    'dev.xrugc.com/path',
+    'dev xrugc',
+    '.dev.xrugc.com',
+    'dev..xrugc.com',
+  ])('rejects unsafe or non-lowercase config key %s', (configKey) => {
+    expect(domainConfigKeySchema.safeParse(configKey).success).toBe(false);
+  });
+
+  it('accepts default, a slug, and dot-separated domain-family keys', () => {
+    expect(domainConfigKeySchema.safeParse('default').success).toBe(true);
+    expect(domainConfigKeySchema.safeParse('campus-agent').success).toBe(true);
+    expect(domainConfigKeySchema.safeParse('dev.xrugc.com').success).toBe(true);
+  });
+
+  it('requires the complete StaticDomainConfig shape and allows future public fields', () => {
+    const parsed = staticDomainConfigSchema.safeParse({
+      ...snapshot,
+      future_public_field: { enabled: true },
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.future_public_field).toEqual({ enabled: true });
+    }
+    expect(staticDomainConfigSchema.safeParse({
+      ...snapshot,
+      configs: undefined,
+    }).success).toBe(false);
+  });
+
+  it('requires configKey to exactly match config.name', () => {
+    const parsed = createDomainConfigSchema.safeParse({
+      configKey: 'xrugc.com',
+      config: snapshot,
+    });
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues).toContainEqual(expect.objectContaining({
+        path: ['config', 'name'],
+      }));
+    }
+  });
+
+  it('applies recursive secret checks to the full domain snapshot', () => {
+    expect(staticDomainConfigSchema.safeParse({
+      ...snapshot,
+      default_config: { nested: { accessToken: 'must-not-be-stored' } },
+    }).success).toBe(false);
+  });
+
+  it('requires external fallback snapshots to contain local Unity config data', () => {
+    expect(staticDomainConfigSchema.safeParse({
+      ...snapshot,
+      default_config: {},
+      configs: {},
+    }).success).toBe(false);
+    expect(staticDomainConfigSchema.safeParse({
+      ...snapshot,
+      default_config: {},
+      configs: { 'zh-CN': {} },
+    }).success).toBe(false);
+    expect(staticDomainConfigSchema.safeParse({
+      ...snapshot,
+      fallback_domain: snapshot.name,
+      default_config: {},
+      configs: {},
+    }).success).toBe(true);
+    expect(staticDomainConfigSchema.safeParse({
+      ...snapshot,
+      default_config: {},
+      configs: { 'zh-CN': { title: 'Local data' } },
+    }).success).toBe(true);
+  });
+
+  it('defaults domain creates to schema v1 and requires explicit v1 on updates', () => {
+    const create = createDomainConfigSchema.safeParse({
+      configKey: snapshot.name,
+      config: snapshot,
+    });
+    expect(create.success).toBe(true);
+    if (create.success) {
+      expect(create.data.schemaVersion).toBe(1);
+    }
+    expect(createDomainConfigSchema.safeParse({
+      configKey: snapshot.name,
+      schemaVersion: 2,
+      config: snapshot,
+    }).success).toBe(false);
+    expect(updateDomainConfigSchema.safeParse({
+      configKey: snapshot.name,
+      revision: 1,
+      config: snapshot,
+    }).success).toBe(false);
+    expect(updateDomainConfigSchema.safeParse({
+      configKey: snapshot.name,
+      schemaVersion: 2,
+      revision: 1,
+      config: snapshot,
+    }).success).toBe(false);
+    expect(updateDomainConfigSchema.safeParse({
+      configKey: snapshot.name,
+      schemaVersion: 1,
+      revision: 1,
+      config: snapshot,
+    }).success).toBe(true);
+  });
+});
+
+describe('public hostname validation and candidate generation', () => {
+  it.each([
+    ['DEV.XRUGC.COM', 'dev.xrugc.com'],
+    ['dev.xrugc.com.', 'dev.xrugc.com'],
+    ['BÜCHER.example', 'xn--bcher-kva.example'],
+    ['campus-agent', 'campus-agent'],
+    ['default', 'default'],
+  ])('normalizes %s to %s', (input, expected) => {
+    expect(requestedDomainSchema.parse(input)).toBe(expected);
+  });
+
+  it.each([
+    'https://dev.xrugc.com',
+    'dev.xrugc.com:443',
+    'dev.xrugc.com/path',
+    'dev.xrugc.com?x=1',
+    'dev.xrugc.com#fragment',
+    'user@dev.xrugc.com',
+    'dev xrugc.com',
+    'dev..xrugc.com',
+    'dev.xrugc.com..',
+  ])('rejects non-hostname input %s', (input) => {
+    expect(requestedDomainSchema.safeParse(input).success).toBe(false);
+  });
+
+  it('tries the exact hostname and then each parent domain', () => {
+    expect(domainConfigCandidates('www.d.dev.xrugc.com')).toEqual([
+      'www.d.dev.xrugc.com',
+      'd.dev.xrugc.com',
+      'dev.xrugc.com',
+      'xrugc.com',
+    ]);
+    expect(domainConfigCandidates('d.dev.xrugc.com')).toEqual([
+      'd.dev.xrugc.com',
+      'dev.xrugc.com',
+      'xrugc.com',
+    ]);
+    expect(domainConfigCandidates('dev.xrugc.com')).toEqual([
+      'dev.xrugc.com',
+      'xrugc.com',
+    ]);
+  });
+
+  it('accepts exactly one domain query and rejects legacy o/d', () => {
+    expect(resolveQuerySchema.parse({ domain: 'DEV.XRUGC.COM.' })).toEqual({
+      domain: 'dev.xrugc.com',
+    });
+    expect(resolveQuerySchema.safeParse({ o: 1, d: 1 }).success).toBe(false);
+    expect(resolveQuerySchema.safeParse({ domain: 'dev.xrugc.com', o: 1 }).success)
+      .toBe(false);
   });
 });

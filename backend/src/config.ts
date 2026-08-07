@@ -1,5 +1,10 @@
 import { z } from 'zod';
 
+const optionalUrlString = z.preprocess(
+  (value) => typeof value === 'string' && value.trim() === '' ? undefined : value,
+  z.string().url().optional(),
+);
+
 const environmentSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -12,8 +17,8 @@ const environmentSchema = z
     DB_CONNECTION_LIMIT: z.coerce.number().int().min(1).max(100).default(10),
     MAIN_API_BASE_URL: z.string().url(),
     MAIN_API_TIMEOUT_MS: z.coerce.number().int().min(250).max(30_000).default(5_000),
-    A1_PUBLIC_BASE_URL: z.string().url(),
-    WHITELABEL_INTERNAL_TOKEN: z.string().min(32),
+    MAIN_FRONTEND_PUBLIC_BASE_URL: optionalUrlString,
+    DOMAIN_CATALOG_TIMEOUT_MS: z.coerce.number().int().min(250).max(10_000).default(3_000),
   })
   .passthrough();
 
@@ -29,10 +34,9 @@ export interface AppConfig {
     connectionLimit: number;
   };
   verifyTokenUrl: URL;
-  organizationListUrl: URL;
   mainApiTimeoutMs: number;
-  a1PublicBaseUrl: URL;
-  internalApiToken: string;
+  domainCatalogManifestUrl: URL | null;
+  domainCatalogTimeoutMs: number;
 }
 
 export function buildVerifyTokenUrl(baseUrl: string): URL {
@@ -48,20 +52,7 @@ export function buildVerifyTokenUrl(baseUrl: string): URL {
   return new URL('v1/plugin/verify-token', parsed);
 }
 
-export function buildOrganizationListUrl(baseUrl: string): URL {
-  const parsed = new URL(baseUrl);
-  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
-    throw new Error('MAIN_API_BASE_URL must use http/https and must not contain credentials');
-  }
-  parsed.search = '';
-  parsed.hash = '';
-  if (!parsed.pathname.endsWith('/')) {
-    parsed.pathname += '/';
-  }
-  return new URL('v1/organization/list', parsed);
-}
-
-export function buildA1PublicBaseUrl(
+export function buildDomainCatalogManifestUrl(
   baseUrl: string,
   nodeEnv: AppConfig['nodeEnv'],
 ): URL {
@@ -75,19 +66,13 @@ export function buildA1PublicBaseUrl(
     || parsed.pathname !== '/'
   ) {
     throw new Error(
-      'A1_PUBLIC_BASE_URL must be a pure http(s) origin without credentials, path, query, or fragment',
+      'MAIN_FRONTEND_PUBLIC_BASE_URL must be a pure http(s) origin without credentials, path, query, or fragment',
     );
   }
   if (nodeEnv === 'production' && parsed.protocol !== 'https:') {
-    throw new Error('A1_PUBLIC_BASE_URL must use HTTPS in production');
+    throw new Error('MAIN_FRONTEND_PUBLIC_BASE_URL must use HTTPS in production');
   }
-  if (
-    parsed.protocol === 'http:'
-    && !['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)
-  ) {
-    throw new Error('Plain HTTP A1_PUBLIC_BASE_URL is allowed only for a loopback host');
-  }
-  return parsed;
+  return new URL('/config/domains/manifest.json', parsed);
 }
 
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -104,9 +89,13 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
       connectionLimit: parsed.DB_CONNECTION_LIMIT,
     },
     verifyTokenUrl: buildVerifyTokenUrl(parsed.MAIN_API_BASE_URL),
-    organizationListUrl: buildOrganizationListUrl(parsed.MAIN_API_BASE_URL),
     mainApiTimeoutMs: parsed.MAIN_API_TIMEOUT_MS,
-    a1PublicBaseUrl: buildA1PublicBaseUrl(parsed.A1_PUBLIC_BASE_URL, parsed.NODE_ENV),
-    internalApiToken: parsed.WHITELABEL_INTERNAL_TOKEN,
+    domainCatalogManifestUrl: parsed.MAIN_FRONTEND_PUBLIC_BASE_URL === undefined
+      ? null
+      : buildDomainCatalogManifestUrl(
+        parsed.MAIN_FRONTEND_PUBLIC_BASE_URL,
+        parsed.NODE_ENV,
+      ),
+    domainCatalogTimeoutMs: parsed.DOMAIN_CATALOG_TIMEOUT_MS,
   };
 }

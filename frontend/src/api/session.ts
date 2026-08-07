@@ -1,28 +1,16 @@
 import { mainApi } from './client'
-import type { OrganizationSummary } from '../domain/types'
 
 export interface SessionUser {
   id?: number
   username: string
   nickname?: string
   roles: string[]
-  organizations: OrganizationSummary[]
 }
 
 function unwrapData(value: unknown): unknown {
   if (!value || typeof value !== 'object') return value
   const record = value as Record<string, unknown>
   return 'data' in record ? record.data : value
-}
-
-function normalizeOrganization(value: unknown): OrganizationSummary | null {
-  if (!value || typeof value !== 'object') return null
-  const record = value as Record<string, unknown>
-  const id = Number(record.id)
-  const name = typeof record.name === 'string' ? record.name.trim() : ''
-  const title = typeof record.title === 'string' ? record.title.trim() : name
-  if (!Number.isInteger(id) || id <= 0 || !name) return null
-  return { id, name, title }
 }
 
 export async function verifyCurrentToken(): Promise<SessionUser> {
@@ -45,26 +33,5 @@ export async function verifyCurrentToken(): Promise<SessionUser> {
           ),
         ]
       : [],
-    organizations: Array.isArray(payload?.organizations)
-      ? payload.organizations
-          .map(normalizeOrganization)
-          .filter(
-            (organization): organization is OrganizationSummary =>
-              organization !== null,
-          )
-      : [],
   }
-}
-
-export async function listOrganizations(): Promise<OrganizationSummary[]> {
-  const response = await mainApi.get('/organization/list')
-  const payload = unwrapData(response.data)
-  if (!Array.isArray(payload)) return []
-
-  return payload
-    .map(normalizeOrganization)
-    .filter(
-      (organization): organization is OrganizationSummary =>
-        organization !== null,
-    )
 }

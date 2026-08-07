@@ -4,84 +4,57 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue }
 export type JsonObject = { [key: string]: JsonValue }
+export type WhiteLabelSchemaVersion = 1
 
-export interface OrganizationSummary {
-  id: number
+/** Same top-level contract as web/public/config/domains/*.json. */
+export interface StaticDomainConfig extends JsonObject {
   name: string
-  title: string
+  description: string
+  is_active: boolean
+  fallback_domain: string | null
+  default_config: JsonObject
+  configs: { [locale: string]: JsonObject }
 }
 
-export interface OrganizationConfigRecord {
-  organizationId: number
-  organizationName: string
-  organizationTitle: string
-  schemaVersion: number
-  revision: number
-  config: JsonObject
-  enabled: boolean
-  createdAt?: string
-  updatedAt?: string
+export interface DomainImportCatalogItem {
+  configKey: string
+  description: string
+  isActive: boolean
+  importable: boolean
+  materializedFrom: string[]
+  warnings: string[]
+  reason?: string
+  config?: StaticDomainConfig
+}
+
+export interface DomainImportCatalog {
+  source: string
+  items: DomainImportCatalogItem[]
 }
 
 export interface DomainConfigRecord {
   domainId: number
-  domain: string
-  displayName: string
+  configKey: string
+  description: string
   schemaVersion: number
   revision: number
-  config: JsonObject
+  config: StaticDomainConfig
   enabled: boolean
   createdAt?: string
   updatedAt?: string
-}
-
-export interface AssignmentRecord {
-  assignmentId: number
-  organizationId: number
-  domainId: number
-  revision: number
-  enabled: boolean
-  organizationEnabled: boolean
-  domainEnabled: boolean
-  qrUrl: string | null
-  organizationName: string
-  organizationTitle: string
-  domain: string
-  domainDisplayName: string
-  createdAt?: string
-  updatedAt?: string
-}
-
-export interface CreateOrganizationConfigInput {
-  organizationId: number
-  schemaVersion: 1
-  config: JsonObject
-}
-
-export interface UpdateOrganizationConfigInput {
-  revision: number
-  schemaVersion: number
-  config: JsonObject
 }
 
 export interface CreateDomainConfigInput {
-  domain: string
-  displayName: string
-  schemaVersion: 1
-  config: JsonObject
+  configKey: string
+  schemaVersion: WhiteLabelSchemaVersion
+  config: StaticDomainConfig
 }
 
 export interface UpdateDomainConfigInput {
-  domain: string
-  displayName: string
-  schemaVersion: number
-  config: JsonObject
+  configKey: string
+  schemaVersion: WhiteLabelSchemaVersion
+  config: StaticDomainConfig
   revision: number
-}
-
-export interface AssignmentInput {
-  organizationId: number
-  domainId: number
 }
 
 export interface ListQuery {

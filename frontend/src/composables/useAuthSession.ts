@@ -19,27 +19,6 @@ export function isRootRole(roles: readonly string[]): boolean {
   return roles.includes('root')
 }
 
-export function isAdminRole(roles: readonly string[]): boolean {
-  return roles.includes('admin')
-}
-
-export function canManageOrganization(
-  sessionUser: {
-    roles: readonly string[]
-    organizations: readonly { id: number }[]
-  } | null,
-  organizationId: number,
-): boolean {
-  if (!sessionUser) return false
-  if (isRootRole(sessionUser.roles)) return true
-  return (
-    isAdminRole(sessionUser.roles) &&
-    sessionUser.organizations.some(
-      (organization) => organization.id === organizationId,
-    )
-  )
-}
-
 const isAuthenticated = computed(() => loaded.value && user.value !== null)
 const hasAdminAccess = computed(
   () => user.value !== null && hasRootOrAdminRole(user.value.roles),
@@ -47,10 +26,6 @@ const hasAdminAccess = computed(
 const isRootUser = computed(
   () => user.value !== null && isRootRole(user.value.roles),
 )
-const isAdminUser = computed(
-  () => user.value !== null && isAdminRole(user.value.roles),
-)
-
 export function invalidateAuthSession(): void {
   sessionGeneration += 1
   user.value = null
@@ -103,7 +78,6 @@ export function useAuthSession() {
     isAuthenticated,
     hasAdminAccess,
     isRootUser,
-    isAdminUser,
     fetchSession,
   }
 }
