@@ -43,22 +43,14 @@ export function conflict(code: string, message: string): AppError {
   return new AppError(409, code, message);
 }
 
-export function organizationNotFound(): AppError {
-  return new AppError(
-    422,
-    'ORGANIZATION_NOT_FOUND',
-    'The organization does not exist in the main platform',
-  );
-}
-
 export function upstreamFailure(): AppError {
   return new AppError(502, 'AUTH_UPSTREAM_ERROR', 'Unable to verify the main-platform session');
 }
 
-export function organizationDirectoryFailure(): AppError {
+export function domainCatalogUnavailable(): AppError {
   return new AppError(
-    502,
-    'ORGANIZATION_DIRECTORY_ERROR',
-    'Unable to verify the organization against the main platform',
+    503,
+    'DOMAIN_CATALOG_UNAVAILABLE',
+    'The main-frontend domain import catalog is unavailable',
   );
 }

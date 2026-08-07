@@ -3,8 +3,8 @@ import { resolve } from 'node:path';
 import { loadEnvFile } from 'node:process';
 import { createApp } from './app';
 import { loadConfig } from './config';
+import { MainFrontendDomainImportCatalog } from './domainImportCatalog';
 import { MysqlWhiteLabelRepository } from './mysqlRepository';
-import { MainApiOrganizationDirectory } from './organizationDirectory';
 import { MainApiSessionVerifier } from './sessionVerifier';
 
 if (process.env.NODE_ENV !== 'production') {
@@ -44,16 +44,16 @@ const sessionVerifier = new MainApiSessionVerifier(
   config.verifyTokenUrl,
   config.mainApiTimeoutMs,
 );
-const organizationDirectory = new MainApiOrganizationDirectory(
-  config.organizationListUrl,
-  config.mainApiTimeoutMs,
-);
+const domainImportCatalog = config.domainCatalogManifestUrl === null
+  ? undefined
+  : new MainFrontendDomainImportCatalog(
+    config.domainCatalogManifestUrl,
+    config.domainCatalogTimeoutMs,
+  );
 const app = createApp({
   repository,
   sessionVerifier,
-  organizationDirectory,
-  internalApiToken: config.internalApiToken,
-  a1PublicBaseUrl: config.a1PublicBaseUrl,
+  domainImportCatalog,
 });
 
 const server = app.listen(config.port, () => {

@@ -1,8 +1,7 @@
-import { isIP } from 'node:net';
 import { domainToASCII } from 'node:url';
 import { z, type ZodType } from 'zod';
 import { unprocessable } from './errors';
-import type { JsonObject, JsonValue } from './types';
+import type { JsonObject, JsonValue, StaticDomainConfig } from './types';
 
 const MAX_CONFIG_BYTES = 64 * 1024;
 const MAX_JSON_DEPTH = 12;
@@ -140,44 +139,53 @@ const rawConfigSecuritySchema = z.unknown().superRefine((value, context) => {
 export const configJsonSchema = rawConfigSecuritySchema
   .pipe(z.record(jsonFieldNameSchema, jsonValueSchema)) as ZodType<JsonObject>;
 
-export const organizationNameSchema = z
+export const domainConfigKeySchema = z
   .string()
-  .trim()
-  .min(1)
-  .max(191)
-  .regex(
-    /^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/,
-    'organizationName must be a stable organization identifier',
-  )
-  .transform((value) => value.toLowerCase());
-
-export const hostnameSchema = z
-  .string()
-  .trim()
   .min(1)
   .max(253)
-  .superRefine((value, context) => {
-    const raw = value.toLowerCase();
-    const ascii = domainToASCII(raw);
-    const labels = ascii.split('.');
-    const labelPattern = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
-    if (
-      !ascii
-      || ascii.length > 253
-      || raw.endsWith('.')
-      || /[^\x00-\x7F]/.test(raw)
-      || /[\s/:?#@*]/.test(raw)
-      || isIP(ascii) !== 0
-      || labels.length < 2
-      || labels.some((label) => label.length === 0 || label.length > 63 || !labelPattern.test(label))
-    ) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'domain must be an exact hostname without a scheme, path, port, wildcard, or IP address',
-      });
+  .regex(
+    /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/,
+    'configKey must be a lowercase domain-config key or slug without a scheme, path, whitespace, or empty label',
+  );
+
+const requestedDomainTextSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(1_024)
+  .refine(
+    (value) => !/[\s/:?#@\\]/.test(value),
+    'domain must be a hostname or slug without a scheme, port, credentials, path, query, or fragment',
+  )
+  .transform((value) => {
+    const withoutOneTrailingDot = value.endsWith('.') ? value.slice(0, -1) : value;
+    return domainToASCII(withoutOneTrailingDot).toLowerCase();
+  });
+
+export const requestedDomainSchema = requestedDomainTextSchema.pipe(domainConfigKeySchema);
+
+/**
+ * Resolves a hostname exactly as a domain-key hierarchy: the complete hostname
+ * first, then each registrable-looking parent. The final single-label TLD is
+ * never treated as a configuration key.
+ */
+export function domainConfigCandidates(domain: string): string[] {
+  const candidates: string[] = [];
+  let candidate = domain;
+  while (candidate) {
+    candidates.push(candidate);
+    const nextDot = candidate.indexOf('.');
+    if (nextDot < 0) {
+      break;
     }
-  })
-  .transform((value) => domainToASCII(value.toLowerCase()));
+    const parent = candidate.slice(nextDot + 1);
+    if (!parent.includes('.')) {
+      break;
+    }
+    candidate = parent;
+  }
+  return candidates;
+}
 
 export const positiveIdSchema = z.coerce
   .number()
@@ -185,56 +193,88 @@ export const positiveIdSchema = z.coerce
   .positive()
   .max(Number.MAX_SAFE_INTEGER);
 
-const domainDisplayNameSchema = z.string().trim().min(1).max(191);
-const schemaVersionSchema = z.number().int().positive().max(2_147_483_647);
-const revisionSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
-
-const organizationWritableFields = {
-  schemaVersion: schemaVersionSchema.default(1),
-  config: configJsonSchema,
-};
-
-export const createOrganizationConfigSchema = z
-  .object({
-    organizationId: positiveIdSchema,
-    ...organizationWritableFields,
-    enabled: z.literal(false).default(false),
-  })
-  .strict();
-
-export const updateOrganizationConfigSchema = z
-  .object({
-    ...organizationWritableFields,
-    revision: revisionSchema,
-  })
-  .strict();
-
-const domainWritableSchema = z.object({
-  domain: hostnameSchema,
-  displayName: domainDisplayNameSchema,
-  schemaVersion: schemaVersionSchema.default(1),
-  config: configJsonSchema,
+const schemaVersionV1Schema = z.literal(1, {
+  invalid_type_error: 'schemaVersion must be 1',
 });
+const revisionSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+const jsonObjectSchema = z.record(jsonFieldNameSchema, jsonValueSchema);
 
-export const createDomainConfigSchema = domainWritableSchema
-  .extend({
+export function hasLocalDomainConfigData(
+  config: Pick<StaticDomainConfig, 'default_config' | 'configs'>,
+): boolean {
+  return Object.keys(config.default_config).length > 0
+    || Object.values(config.configs)
+      .some((localizedConfig) => Object.keys(localizedConfig).length > 0);
+}
+
+export const staticDomainConfigStructureSchema = rawConfigSecuritySchema.pipe(
+  z.object({
+    name: domainConfigKeySchema,
+    description: z.string().max(191),
+    is_active: z.boolean(),
+    fallback_domain: domainConfigKeySchema.nullable(),
+    default_config: jsonObjectSchema,
+    configs: z.record(jsonFieldNameSchema, jsonObjectSchema),
+  })
+    .catchall(jsonValueSchema)
+    .superRefine((config, context) => {
+      if (config.description.trim() === '' && config.name.length > 191) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['description'],
+          message: 'description is required when config.name exceeds 191 characters',
+        });
+      }
+    }),
+) as ZodType<StaticDomainConfig>;
+
+export const staticDomainConfigSchema = staticDomainConfigStructureSchema
+  .superRefine((config, context) => {
+    if (
+      config.fallback_domain !== null
+      && config.fallback_domain !== config.name
+      && !hasLocalDomainConfigData(config)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['fallback_domain'],
+        message: 'an external fallback requires local default_config or configs data; Unity snapshots must be self-contained',
+      });
+    }
+  }) as ZodType<StaticDomainConfig>;
+
+function matchingDomainConfigKey(
+  value: { configKey: string; config: StaticDomainConfig },
+  context: z.RefinementCtx,
+): void {
+  if (value.configKey !== value.config.name) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['config', 'name'],
+      message: 'config.name must exactly match configKey',
+    });
+  }
+}
+
+export const createDomainConfigSchema = z
+  .object({
+    configKey: domainConfigKeySchema,
+    schemaVersion: schemaVersionV1Schema.default(1),
+    config: staticDomainConfigSchema,
     enabled: z.literal(false).default(false),
   })
-  .strict();
+  .strict()
+  .superRefine(matchingDomainConfigKey);
 
-export const updateDomainConfigSchema = domainWritableSchema
-  .extend({
+export const updateDomainConfigSchema = z
+  .object({
+    configKey: domainConfigKeySchema,
+    schemaVersion: schemaVersionV1Schema,
+    config: staticDomainConfigSchema,
     revision: revisionSchema,
   })
-  .strict();
-
-export const createAssignmentSchema = z
-  .object({
-    organizationId: positiveIdSchema,
-    domainId: positiveIdSchema,
-    enabled: z.literal(false).default(false),
-  })
-  .strict();
+  .strict()
+  .superRefine(matchingDomainConfigKey);
 
 export const revisionBodySchema = z
   .object({
@@ -252,8 +292,7 @@ export const listQuerySchema = z
 
 export const resolveQuerySchema = z
   .object({
-    o: positiveIdSchema,
-    d: positiveIdSchema,
+    domain: requestedDomainSchema,
   })
   .strict();
 

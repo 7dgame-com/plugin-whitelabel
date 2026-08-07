@@ -1,63 +1,30 @@
 # REST API 契约
 
-所有管理时间均为 ISO 8601 UTC。成功响应使用 `code: 0`。创建默认停用，不提供硬
-删除。PUT 和启停请求必须携带当前 `revision`，冲突返回 `409 Conflict`。
+## 1. 管理鉴权
 
-## 1. 管理 API 通用鉴权
-
-管理请求携带主平台 Bearer token。插件后端逐请求调用：
+所有 `/api/v1/*` 请求携带主平台 Bearer token。插件后端逐请求调用固定的主后端
+地址：
 
 ```http
 GET /v1/plugin/verify-token
 Authorization: Bearer <main-platform-token>
 ```
 
-- root：不受组织范围限制；
-- admin：组织 API 和组合列表强制限制到 `organizations[].id`；
+- root：可读写；
+- admin：只读域名列表和详情；
 - user / manager：403；
-- 主后端不可用或响应无效：失败关闭，不执行管理操作。
+- token 无效或主后端不可用：失败关闭，不执行操作。
 
-## 2. 组织 JSON
+插件只读取会话中的用户 ID 与角色。`organizations` 即使出现在主后端响应中也会被
+忽略。
 
-```http
-GET  /api/v1/organization-configs?page=1&pageSize=20&q=buyer
-POST /api/v1/organization-configs
-GET  /api/v1/organization-configs/{organizationId}
-PUT  /api/v1/organization-configs/{organizationId}
-POST /api/v1/organization-configs/{organizationId}/enable
-POST /api/v1/organization-configs/{organizationId}/disable
-```
+管理成功响应使用 `code: 0`；时间为 ISO 8601 UTC。创建默认停用，不提供硬删除。
+更新和启停必须携带当前 `revision`，冲突返回 `409 Conflict`。
 
-创建示例：
-
-```json
-{
-  "organizationId": 42,
-  "schemaVersion": 1,
-  "config": {}
-}
-```
-
-更新示例：
-
-```json
-{
-  "revision": 3,
-  "schemaVersion": 1,
-  "config": {}
-}
-```
-
-admin 只能为当前会话包含的组织 ID 创建、查看、修改或启停。组织 ID 在创建后不可
-更改。组织名称和标题不接受客户端写入：admin 使用 `verify-token` 权威快照，root
-通过现有主后端组织目录确认 ID 并取得权威快照。
-
-## 3. 域名 JSON
-
-域名写操作仅 root 可用：
+## 2. 域名配置管理
 
 ```http
-GET  /api/v1/domain-configs?page=1&pageSize=20&q=agent
+GET  /api/v1/domain-configs?page=1&pageSize=20&q=xrugc
 POST /api/v1/domain-configs
 GET  /api/v1/domain-configs/{domainId}
 PUT  /api/v1/domain-configs/{domainId}
@@ -65,125 +32,184 @@ POST /api/v1/domain-configs/{domainId}/enable
 POST /api/v1/domain-configs/{domainId}/disable
 ```
 
-创建示例：
+GET 允许 root 和 admin；POST、PUT、enable、disable 只允许 root。
+
+创建：
 
 ```json
 {
-  "domain": "agent.example.com",
-  "displayName": "代理方 A",
+  "configKey": "dev.xrugc.com",
   "schemaVersion": 1,
+  "config": {
+    "name": "dev.xrugc.com",
+    "description": "XR UGC Dev",
+    "is_active": true,
+    "fallback_domain": "default",
+    "default_config": {
+      "homepage": "https://dev.xrugc.com/"
+    },
+    "configs": {
+      "zh-CN": {
+        "title": "XR UGC Dev"
+      }
+    }
+  }
+}
+```
+
+创建时 `schemaVersion` 可省略并默认使用 1。`configKey` 必须与 `config.name` 完全
+相等。`domainId`、显示说明和审计字段由服务端生成。
+
+更新使用相同字段并增加 revision：
+
+```json
+{
+  "configKey": "dev.xrugc.com",
+  "schemaVersion": 1,
+  "revision": 5,
   "config": {}
 }
 ```
 
-服务端生成数字 `domainId`。hostname 规范化为小写精确域名，禁止 scheme、路径、
-端口、通配符和 IP，且全局唯一。
+上例中的 `config` 仅为结构缩写；实际请求仍须满足完整 `StaticDomainConfig` Schema。
 
-## 4. 组合授权与二维码
-
-```http
-GET  /api/v1/assignments?page=1&pageSize=20
-POST /api/v1/assignments
-POST /api/v1/assignments/{assignmentId}/enable
-POST /api/v1/assignments/{assignmentId}/disable
-```
-
-创建仅 root 可用：
+启停：
 
 ```json
 {
-  "organizationId": 42,
-  "domainId": 8
+  "revision": 5
 }
 ```
 
-组合列表权限：
+约束：
 
-- root 查看全部；
-- admin 只查看自己当前所属组织的组合；
-- admin 不得创建或启停组合。
+- `config.name` 是静态配置键，不是每次访问的精确 hostname；
+- `config.description` 是显示说明来源；
+- `config.is_active=false` 的记录不能启用；
+- 已启用记录不能直接保存为 `config.is_active=false`，应先停用；
+- `fallback_domain` 不触发运行时递归读取；
+- JSON 必须自包含，且通过大小、深度、字段名和敏感键检查。
 
-组合响应包含由后端固定 `A1_PUBLIC_BASE_URL` 生成的 `qrUrl`：
+## 3. 主前端域名导入目录
+
+```http
+GET /api/v1/domain-import-catalog
+```
+
+仅 root 可用。后端只访问部署配置给出的主前端纯 origin，并固定追加：
+
+```text
+/config/domains/manifest.json
+```
+
+浏览器不能提交任意 URL。响应：
 
 ```json
 {
-  "assignmentId": 12,
-  "organizationId": 42,
-  "domainId": 8,
-  "revision": 2,
-  "enabled": true,
-  "organization": {
-    "name": "buyer-a",
-    "title": "购买方 A",
-    "enabled": true
-  },
-  "domain": {
-    "host": "agent.example.com",
-    "displayName": "代理方 A",
-    "enabled": true
-  },
-  "createdBy": "1001",
-  "updatedBy": "1001",
-  "statusChangedBy": "1001",
-  "createdAt": "2026-07-31T08:00:00.000Z",
-  "updatedAt": "2026-07-31T08:05:00.000Z",
-  "statusChangedAt": "2026-07-31T08:05:00.000Z",
-  "qrUrl": "https://a1.example.com/v1/white-label-configs?o=42&d=8"
+  "source": "https://d.dev.xrugc.com/config/domains/manifest.json",
+  "items": [
+    {
+      "configKey": "dev.xrugc.com",
+      "description": "XR UGC Dev",
+      "isActive": true,
+      "importable": true,
+      "materializedFrom": [],
+      "warnings": [],
+      "config": {}
+    }
+  ]
 }
 ```
 
-`qrUrl` 不从浏览器请求 host、Origin 或用户输入构造。
-前端只有在组合、`organization.enabled` 和 `domain.enabled` 三层同时为 true 时才
-显示可用二维码。
+导入只把选中快照复制到编辑器，仍需 root 明确保存。保存后插件数据不会跟随主前端
+文件变化。
 
-## 5. 插件内部解析 API
+目录未配置、超时或协议无效时该辅助接口返回 503；已有域名 CRUD、健康检查和公开
+解析不受影响。外部 fallback 最多物化 8 层并检测循环，不能安全物化的条目只标记为
+不可导入。
 
-仅 `yii3-a1` 可调用：
+## 4. Unity 公开解析
 
 ```http
-GET /internal/v1/white-label-configs/resolve?o=42&d=8
-X-Internal-Token: <shared-secret>
-If-None-Match: "wl-o42-r3-d8-r5-a2"
+GET /v1/white-label-configs?domain=d.dev.xrugc.com
+If-None-Match: "<previous-etag>"
 ```
 
-成功响应不使用 `code/data` 包装，A1 可以原样转发：
+请求恰好接受一个 `domain` 参数：
+
+- 必须是 hostname 或静态配置 slug；
+- 接受大小写和单个 DNS 尾点并规范化；
+- IDN 统一转为 ASCII/Punycode；
+- 拒绝 scheme、路径、query、fragment、端口、userinfo、通配符和空 label；
+- 不接受 `organizationId`、`o`、数字 `d`、loginKey 或上游 URL。
+
+成功响应直接就是匹配到的配置 JSON，不使用 `code/data` 包装，也不返回内部
+`domainId`：
 
 ```json
 {
-  "version": 1,
-  "organization": {
-    "id": 42,
-    "name": "buyer-a",
-    "title": "购买方 A",
-    "schemaVersion": 1,
-    "revision": 3,
-    "config": {}
-  },
-  "domain": {
-    "id": 8,
-    "host": "agent.example.com",
-    "schemaVersion": 1,
-    "revision": 5,
-    "config": {}
-  }
+  "name": "dev.xrugc.com",
+  "description": "XR UGC Dev",
+  "is_active": true,
+  "fallback_domain": "default",
+  "default_config": {},
+  "configs": {}
 }
 ```
 
 响应头：
 
 ```http
-ETag: "wl-o42-r3-d8-r5-a2"
-Cache-Control: private, max-age=60
+ETag: "..."
+Cache-Control: public, no-cache, must-revalidate
 ```
 
-任一配置或组合不存在、停用以及 ID 非法均返回相同 404。
+客户端和中间缓存可以保存响应，但每次应用前都必须携带 `If-None-Match` 重验证；命中
+返回 304。这样 root 停用记录后不会继续使用尚在 freshness 窗口内的旧品牌。
+匹配顺序固定为完整域名到父域名。例如 `d.dev.xrugc.com` 依次查找：
 
-## 6. Unity / yii3-a1 公开 API
-
-```http
-GET /v1/white-label-configs?o=42&d=8
-If-None-Match: "wl-o42-r3-d8-r5-a2"
+```text
+d.dev.xrugc.com -> dev.xrugc.com -> xrugc.com -> {}
 ```
 
-A1 严格校验两个参数为正整数，然后调用固定的插件内部地址。它不访问插件数据库，
-不转发客户端 Authorization，也不复制白牌权限和组合逻辑。
+以下情况返回 HTTP 200 和空 JSON `{}`：
+
+- 所有域名候选均不存在；
+- 候选顺序中的第一条现有记录被停用；
+- `config.is_active=false`。
+
+以下非法请求统一返回 404：
+
+- 参数缺失、额外、非法；
+- 旧版 `?o=<id>&d=<id>` 请求。
+
+公开接口不读取登录身份或组织。登录成功与白牌解析成功是两个独立结果。
+
+## 5. 已移除的 API
+
+域名唯一模型不再提供：
+
+```text
+/api/v1/organization-configs
+/api/v1/assignments
+```
+
+插件也不再生成白牌二维码或组合 URL。旧表可能暂时留在已有数据库用于审计，但没有
+任何 HTTP 路径可以读写它们。
+
+## 6. 错误格式
+
+管理 API 的已知错误：
+
+```json
+{
+  "error": {
+    "code": "REVISION_CONFLICT",
+    "message": "The record changed before this request was applied",
+    "details": {}
+  }
+}
+```
+
+公开 resolver 对不存在和停用统一返回 `{}`；只有参数缺失、额外或非法时返回普通
+404。

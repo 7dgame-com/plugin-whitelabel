@@ -8,7 +8,7 @@
     "ja-JP": "ホワイトラベル",
     "th-TH": "ไวท์เลเบล"
   },
-  "description": "分别管理购买方组织 JSON、代理方域名 JSON 及其 Unity 二维码组合",
+  "description": "按访问域名管理并解析一份独立的 Unity 白牌 JSON 快照",
   "url": "http://localhost:3012/",
   "icon": "Brush",
   "group": "management",

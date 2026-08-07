@@ -1,115 +1,118 @@
-# 部署与接入
+# 部署与数据切换
 
-## 1. 插件服务
+## 1. 服务
 
-部署：
-
-- `frontend`：Vue 静态应用；
-- `backend`：管理 API 和 A1 内部解析 API；
-- `db`：插件独立 MySQL database/schema，可与其他服务复用同一 MySQL 实例。
+| 服务 | 职责 |
+|---|---|
+| `frontend` | root/admin 域名管理界面 |
+| `backend` | 管理 API 与公开域名解析 API |
+| MySQL 8 | 插件独立 database/schema |
 
 关键环境变量：
 
 | 组件 | 变量 | 说明 |
 |---|---|---|
-| frontend | `APP_API_1_URL` | 现有主后端地址 |
-| frontend | `APP_BACKEND_1_URL` | 插件后端地址 |
-| backend | `MAIN_API_BASE_URL` | 现有主后端固定地址 |
-| backend | `A1_PUBLIC_BASE_URL` | 二维码使用的 A1 公网 HTTPS origin |
-| backend | `DB_HOST` 等 | 插件数据库 |
-| backend | `WHITELABEL_INTERNAL_TOKEN` | A1 内部调用共享 secret |
+| frontend | `APP_API_1_URL` | 主后端地址，用于 verify-token |
+| frontend | `APP_BACKEND_1_URL` | 插件后端内部地址 |
+| backend | `MAIN_API_BASE_URL` | 主后端固定 base URL |
+| backend | `MAIN_API_TIMEOUT_MS` | 管理鉴权超时 |
+| backend | `MAIN_FRONTEND_PUBLIC_BASE_URL` | 可选；root 导入使用的主前端纯 origin |
+| backend | `DOMAIN_CATALOG_TIMEOUT_MS` | 可选；manifest 超时 |
+| backend | `DB_HOST` 等 | 插件 MySQL |
 
-`WHITELABEL_INTERNAL_TOKEN` 必须由 Secret 管理器注入且至少 32 字符，不能写入镜像、
-仓库或任何白牌 JSON。
+插件不再生成二维码，因此没有 `WHITELABEL_PUBLIC_BASE_URL`。公开 resolver 的完整 URL
+由开发环境的入口代理和独立登录上下文提供。
 
-示例 Compose 为本地开发保留插件后端端口，以便独立运行的 A1 调用。生产部署应让
-A1 和插件后端通过受控内网服务发现互通，不向公网发布 `8093`；MySQL 也只在内部
-网络暴露。仓库 Compose 是本地开发配置，端口只绑定 loopback，不能直接用于生产。
-前端 nginx 和 Vite 只代理 `/backend/api/*`，其他 `/backend/*` 路径全部拒绝，
-浏览器无法到达内部解析接口。
+## 2. 网络边界
 
-## 2. 主前端注册
+管理前端同源代理：
 
-通过 `system-admin` 写 API 注册
-`system-admin-registration.example.json`（snake_case）：
+```text
+/api/*          -> 主后端
+/backend/api/*  -> 插件后端管理 API
+```
+
+公开入口只向插件后端暴露：
+
+```http
+GET /v1/white-label-configs?domain=<hostname>
+```
+
+建议对该路径限流并保留 ETag。不要把插件后端的整个 `/api/v1/*` 直接暴露给公网；管理
+接口仍必须经过 Bearer token 校验。MySQL 只在内部网络开放。
+
+公开 resolver 直接访问插件后端，不经过主前端、主后端或 `yii3-a1`。
+
+## 3. 主前端注册
+
+`system-admin-registration.example.json` 使用 snake_case：
 
 - `access_scope = admin-only`；
 - `organization_name = null`；
-- 插件注册记录使用公共组织范围；
-- `url` 使用插件真实地址，system-admin 会从中派生 allowed origin。
+- `url` 使用插件开发环境真实地址；
+- root 与 admin 可见，写权限仍由插件后端限制为 root。
 
-`plugins.json.example` 是主前端静态目录的 camelCase 格式，不可混用为写 API DTO。
+`plugins.json.example` 是主前端静态目录的 camelCase 版本，不能直接作为 system-admin
+写 API 请求体。
 
-无需修改 `web/src/plugin-system` 或主前端业务路由。
+无需修改主前端 PluginSystem 或动态路由。
 
-## 3. 主后端
+## 4. 主前端 manifest 边界
 
-不做代码和数据库改造。插件复用现有：
+插件域名 JSON 与主前端 `web/public/config/domains/{configKey}.json` 使用同一数据结构
+和配置键语义，但保存后是两份独立数据：
 
-- `GET /v1/plugin/verify-token`：角色和多个组织 ID；
-- 现有组织列表：root 配置界面的组织选择。
+- 主前端构建发布 `/config/domains/manifest.json`；
+- root 可在插件编辑器中选择一项并一次性复制；
+- 插件不写主前端仓库，也不在运行时读取 manifest；
+- manifest 不可用不会影响已有配置解析；
+- 若新键也要影响主前端本身，仍需在主前端仓库单独增加 JSON 并发布。
 
-主后端故障时管理请求失败关闭，但 Unity → A1 → 插件内部 API 的读取链路不经过主
-后端。
+## 5. 数据库初始化与旧数据
 
-## 4. yii3-a1
-
-A1 配置：
-
-```env
-WHITELABEL_SERVICE_URL=http://whitelabel-backend:8093
-WHITELABEL_INTERNAL_TOKEN=<与插件后端一致的 secret>
-```
-
-A1 公开：
-
-```http
-GET /v1/white-label-configs?o={organizationId}&d={domainId}
-```
-
-A1 只读调用：
-
-```http
-GET /internal/v1/white-label-configs/resolve?o={organizationId}&d={domainId}
-X-Internal-Token: <secret>
-```
-
-不存在 `yii3-a3` 接入。
-
-## 5. 数据初始化
-
-首次部署先应用：
+新安装应用：
 
 ```text
 backend/db/schema.sql
 ```
 
-脚本只创建插件自己的三张业务表，不修改主平台数据库。
+它只创建 `white_label_domain_config`。
 
-## 6. 分支与 CI/CD
+已有数据库的旧组织和 assignment 表不删除，新代码停止读写它们。切换前必须导出
+以下清单：
 
-本仓库使用：
+- 所有 `white_label_domain_config` 及当前启停状态；
+- 所有旧组织/assignment 数据用于审计；
+- 每个已启用域名过去实际连接的组织数量。
 
-- `develop`：开发集成；
-- `main`：稳定版本；
-- `publish`：生产发布。
+重要行为变化：旧模型要求组织、assignment、域名三层同时启用；新模型只检查域名。
+因此生产切换前不能盲目沿用旧 `is_enabled=1`。安全流程：
 
-三个分支的 push 都会运行：
+1. 备份数据库；
+2. 列出所有已启用域名，由 root 确认其配置现在可以对该域名的所有用户公开；
+3. 未确认的记录先停用；
+4. 仅部署新公开接口和新客户端到开发环境；
+5. 验证域名候选、停用熔断、缓存和 last-known-good；
+6. 完成安全评审后再制定 main/publish 迁移窗口；
+7. 旧表归档作为独立、可回滚的运维变更，不能夹带在应用发布中。
 
-1. Node.js 22 与 pnpm 10.12.1 锁定安装；
-2. TypeScript/Vue 类型检查、单元测试和生产构建；
-3. 使用 MySQL 8 service 的真实 repository 集成测试；
-4. Docker 发布工作流内的同等质量门禁；
-5. 质量门禁通过后构建 `linux/amd64` 前后端镜像并推送腾讯容器镜像服务。
+本仓库不自动把组织 JSON 合并进域名 JSON，也不执行破坏性 DDL。
 
-镜像地址：
+## 6. 登录上下文接入
+
+白牌插件部署只需提供公开 resolver URL，例如：
 
 ```text
-hkccr.ccs.tencentyun.com/plugins/plugin-whitelabel-frontend
-hkccr.ccs.tencentyun.com/plugins/plugin-whitelabel-backend
+https://whitelabel-d.plugins.xrugc.com/v1/white-label-configs
 ```
 
-tag 规则：
+这个 URL 与当前前端 hostname 由另一份 loginKey 临时上下文提供给新 Unity 客户端。
+插件本身不连接该 Redis、不读取 loginKey，也不关心上下文中的组织。详细契约见
+[登录上下文与 Unity 接入](login-context-integration.md)。
+
+## 7. CI/CD
+
+分支与镜像 tag：
 
 | Git 分支 | 镜像 tag |
 |---|---|
@@ -117,22 +120,33 @@ tag 规则：
 | `main` | `main` |
 | `publish` | `publish`、`latest` |
 
-GitHub 仓库必须提供 `TENCENT_REGISTRY_USER` 和
-`TENCENT_REGISTRY_PASSWORD` Actions Secrets。两个镜像都从仓库根目录构建，以便使用
-同一份 pnpm workspace 锁文件；数据库继续使用腾讯环境中的标准 MySQL 8 服务，不会
-上传数据库镜像。
+工作流运行：
 
-## 7. 发布前检查
+1. Node.js 22 + pnpm 10.12.1 锁定安装；
+2. TypeScript/Vue 类型检查、单元测试、生产构建；
+3. MySQL 8 repository 集成测试；
+4. 构建 `linux/amd64` 镜像并推送腾讯容器镜像服务。
 
-- root 能管理全部组织、域名和组合；
-- admin 属于多个组织时能管理这些组织 JSON，不能读取其他组织；
-- admin 不能修改域名 JSON 或组合授权；
-- user / manager 无法进入插件且管理 API 返回 403；
-- 新组织、新域名和新组合都默认停用；
-- 只有三层都启用的组合可由 A1 返回；
-- 任一缺失或停用统一 404；
+```text
+hkccr.ccs.tencentyun.com/plugins/plugin-whitelabel-frontend
+hkccr.ccs.tencentyun.com/plugins/plugin-whitelabel-backend
+```
+
+当前工作只可推送 `develop` tag 并部署开发栈。不得触发 main、publish、latest 或修改
+生产栈。
+
+## 8. 开发环境验收
+
+- root 能查看、创建、编辑、启停和导入域名配置；
+- admin 能查看列表和完整 JSON，但没有任何写入口，直接写 API 返回 403；
+- user / manager 无法进入插件；
+- 管理界面不再出现组织、assignment、二维码或 `o/d`；
+- `d.dev.xrugc.com` 依次匹配自身、`dev.xrugc.com`、`xrugc.com`；
+- 大小写、尾点和 IDN 规范化正确；scheme、路径、端口、userinfo 被拒绝；
+- 第一条存在但停用的记录阻断父域名回退并返回 `{}`；
+- 未知域名在所有候选不存在时返回 `{}`，不使用 `default`；
+- 响应不含组织、assignment 或公开 `domainId`；
 - ETag 命中返回 304；
-- 主后端不可用时不放行管理写操作；
-- 插件后端不可用时 A1 返回 503；
-- 两份 JSON 均不存在 token、password、secret、privateKey 等字段；
-- 生产二维码 URL 使用 HTTPS 且来自固定 `A1_PUBLIC_BASE_URL`。
+- 主后端不可用时管理失败关闭，公开解析仍可工作；
+- 登录二维码仍是 `web_<loginKey>`，旧客户端登录行为不变；
+- 仅开发域名和 develop 镜像被修改。

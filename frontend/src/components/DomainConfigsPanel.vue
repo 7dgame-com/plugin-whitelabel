@@ -1,19 +1,24 @@
 <template>
-  <section v-if="isRootUser" class="resource-panel">
+  <section class="resource-panel">
     <div class="section-heading">
       <div>
-        <div class="eyebrow warning">{{ t('domain.agentLabel') }}</div>
+        <div class="eyebrow">{{ t('domain.scopeLabel') }}</div>
         <h2>{{ t('domain.title') }}</h2>
         <p>{{ t('domain.description') }}</p>
       </div>
-      <el-button type="primary" :icon="Plus" @click="openCreate">
+      <el-button
+        v-if="isRootUser"
+        type="primary"
+        :icon="Plus"
+        @click="openCreate"
+      >
         {{ t('domain.add') }}
       </el-button>
     </div>
 
     <el-alert
-      :title="t('domain.rootScope')"
-      type="warning"
+      :title="isRootUser ? t('domain.rootScope') : t('domain.adminScope')"
+      :type="isRootUser ? 'warning' : 'info'"
       :closable="false"
       show-icon
     />
@@ -41,20 +46,29 @@
       stripe
       :empty-text="t('common.noData')"
     >
-      <el-table-column
-        prop="displayName"
-        :label="t('domain.displayName')"
-        min-width="180"
-      />
-      <el-table-column :label="t('domain.hostname')" min-width="220">
+      <el-table-column :label="t('domain.configKey')" min-width="260">
         <template #default="{ row }">
           <div class="identity-cell">
-            <code>{{ row.domain }}</code>
-            <span>#{{ row.domainId }}</span>
+            <div class="identity-line">
+              <code>{{ row.configKey }}</code>
+              <span>#{{ row.domainId }}</span>
+            </div>
+            <span>
+              {{
+                row.configKey === 'default'
+                  ? t('domain.defaultMatch')
+                  : t('domain.subdomainMatch', { domain: row.configKey })
+              }}
+            </span>
           </div>
         </template>
       </el-table-column>
-      <el-table-column :label="t('common.jsonObject')" min-width="150">
+      <el-table-column :label="t('domain.descriptionField')" min-width="180">
+        <template #default="{ row }">
+          {{ domainDescriptionLabel(row.description, row.configKey) }}
+        </template>
+      </el-table-column>
+      <el-table-column :label="t('domain.unityJson')" min-width="150">
         <template #default="{ row }">
           <code class="json-summary">
             {{ t('common.jsonKeyCount', { count: Object.keys(row.config).length }) }}
@@ -70,11 +84,19 @@
       <el-table-column :label="t('common.status')" width="110" align="center">
         <template #default="{ row }">
           <el-switch
+            v-if="isRootUser"
             :model-value="row.enabled"
             :loading="togglePending.has(row.domainId)"
             :disabled="togglePending.has(row.domainId)"
             @change="toggleEnabled(row, Boolean($event))"
           />
+          <el-tag
+            v-else
+            size="small"
+            :type="row.enabled ? 'success' : 'info'"
+          >
+            {{ row.enabled ? t('common.enabled') : t('common.disabled') }}
+          </el-tag>
         </template>
       </el-table-column>
       <el-table-column
@@ -83,8 +105,8 @@
         fixed="right"
       >
         <template #default="{ row }">
-          <el-button link type="primary" @click="openEdit(row)">
-            {{ t('common.edit') }}
+          <el-button link type="primary" @click="openRecord(row)">
+            {{ isRootUser ? t('common.edit') : t('common.view') }}
           </el-button>
         </template>
       </el-table-column>
@@ -105,15 +127,8 @@
       v-model:visible="editorVisible"
       :saving="saving"
       :record="editing"
+      :read-only="editorReadOnly"
       @submit="save"
-    />
-  </section>
-
-  <section v-else class="resource-panel restricted-panel">
-    <el-result
-      icon="info"
-      :title="t('domain.rootOnlyTitle')"
-      :sub-title="t('domain.rootOnlyDescription')"
     />
   </section>
 </template>
@@ -132,10 +147,8 @@ import {
   updateDomainConfig,
 } from '../api/whiteLabelManagement'
 import { useAuthSession } from '../composables/useAuthSession'
-import type {
-  DomainConfigRecord,
-  JsonObject,
-} from '../domain/types'
+import { domainDescriptionLabel } from '../domain/domainIdentity'
+import type { DomainConfigRecord, StaticDomainConfig } from '../domain/types'
 
 const { t } = useI18n()
 const { isRootUser } = useAuthSession()
@@ -149,11 +162,11 @@ const pageSize = ref(20)
 const total = ref(0)
 const items = ref<DomainConfigRecord[]>([])
 const editorVisible = ref(false)
+const editorReadOnly = ref(false)
 const editing = ref<DomainConfigRecord | null>(null)
 const togglePending = ref(new Set<number>())
 
 async function load(): Promise<void> {
-  if (!isRootUser.value) return
   loading.value = true
   try {
     const result = await listDomainConfigs({
@@ -184,13 +197,14 @@ function changePageSize(): void {
 function openCreate(): void {
   if (!isRootUser.value) return
   editing.value = null
+  editorReadOnly.value = false
   editorVisible.value = true
 }
 
-async function openEdit(row: DomainConfigRecord): Promise<void> {
-  if (!isRootUser.value) return
+async function openRecord(row: DomainConfigRecord): Promise<void> {
   try {
     editing.value = await getDomainConfig(row.domainId)
+    editorReadOnly.value = !isRootUser.value
     editorVisible.value = true
   } catch {
     ElMessage.error(t('domain.loadFailed'))
@@ -198,18 +212,17 @@ async function openEdit(row: DomainConfigRecord): Promise<void> {
 }
 
 async function save(value: {
-  domain: string
-  displayName: string
-  config: JsonObject
+  configKey: string
+  config: StaticDomainConfig
 }): Promise<void> {
-  if (!isRootUser.value) return
+  if (!isRootUser.value || editorReadOnly.value) return
   saving.value = true
   try {
     if (editing.value) {
       await updateDomainConfig(editing.value.domainId, {
         ...value,
         revision: editing.value.revision,
-        schemaVersion: editing.value.schemaVersion,
+        schemaVersion: 1,
       })
     } else {
       await createDomainConfig({

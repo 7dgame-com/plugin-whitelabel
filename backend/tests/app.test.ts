@@ -1,24 +1,16 @@
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 import { createApp } from '../src/app';
+import type { DomainImportCatalog } from '../src/domainImportCatalog';
 import type {
-  Assignment,
   AuthenticatedSession,
   DomainConfig,
-  OrganizationDirectory,
-  OrganizationConfig,
-  ResolvedWhiteLabel,
   SessionVerifier,
+  StaticDomainConfig,
   WhiteLabelRepository,
 } from '../src/types';
-import { organizationDirectoryFailure } from '../src/errors';
 
-const ORGANIZATION_ID = 12;
 const DOMAIN_ID = 34;
-const ASSIGNMENT_ID = 56;
-const INTERNAL_TOKEN = 'test-internal-token-that-is-long-enough';
-const A1_BASE_URL = new URL('https://a1.fixed.example');
-
 const audit = {
   createdBy: '1',
   updatedBy: '1',
@@ -28,18 +20,16 @@ const audit = {
   statusChangedAt: '2026-01-02T00:00:00.000Z',
 };
 
-function organization(
-  overrides: Partial<OrganizationConfig> = {},
-): OrganizationConfig {
+function domainSnapshot(
+  overrides: Partial<StaticDomainConfig> = {},
+): StaticDomainConfig {
   return {
-    organizationId: ORGANIZATION_ID,
-    organizationName: 'acme',
-    organizationTitle: 'Acme Academy',
-    schemaVersion: 1,
-    revision: 4,
-    config: { branding: { primaryColor: '#123456' } },
-    enabled: true,
-    ...audit,
+    name: 'dev.xrugc.com',
+    description: 'XR UGC Dev',
+    is_active: true,
+    fallback_domain: 'xrugc.com',
+    default_config: { homepage: 'https://dev.xrugc.com/' },
+    configs: { 'zh-CN': { title: 'XR UGC Dev' } },
     ...overrides,
   };
 }
@@ -47,79 +37,24 @@ function organization(
 function domain(overrides: Partial<DomainConfig> = {}): DomainConfig {
   return {
     domainId: DOMAIN_ID,
-    domain: 'ar.acme.example',
-    displayName: 'Acme AR',
-    schemaVersion: 2,
+    configKey: 'dev.xrugc.com',
+    displayName: 'XR UGC Dev',
+    schemaVersion: 1,
     revision: 3,
-    config: { endpoints: { supportUrl: 'https://support.acme.example' } },
+    config: domainSnapshot(),
     enabled: true,
     ...audit,
     ...overrides,
-  };
-}
-
-function assignment(overrides: Partial<Assignment> = {}): Assignment {
-  return {
-    assignmentId: ASSIGNMENT_ID,
-    organizationId: ORGANIZATION_ID,
-    domainId: DOMAIN_ID,
-    revision: 7,
-    enabled: true,
-    organization: {
-      name: 'acme',
-      title: 'Acme Academy',
-      enabled: true,
-    },
-    domain: {
-      host: 'ar.acme.example',
-      displayName: 'Acme AR',
-      enabled: true,
-    },
-    ...audit,
-    ...overrides,
-  };
-}
-
-function resolved(): ResolvedWhiteLabel {
-  return {
-    assignmentRevision: 7,
-    organization: {
-      id: ORGANIZATION_ID,
-      name: 'acme',
-      title: 'Acme Academy',
-      revision: 4,
-      schemaVersion: 1,
-      config: { branding: { primaryColor: '#123456' } },
-    },
-    domain: {
-      id: DOMAIN_ID,
-      host: 'ar.acme.example',
-      revision: 3,
-      schemaVersion: 2,
-      config: { endpoints: { supportUrl: 'https://support.acme.example' } },
-    },
   };
 }
 
 function repository(overrides: Partial<WhiteLabelRepository> = {}): WhiteLabelRepository {
   return {
     health: vi.fn().mockResolvedValue(undefined),
-    listOrganizationConfigs: vi.fn().mockResolvedValue({ items: [], total: 0 }),
-    createOrganizationConfig: vi.fn().mockResolvedValue(
-      organization({ revision: 1, enabled: false }),
-    ),
-    findOrganizationConfig: vi.fn().mockResolvedValue(organization()),
-    updateOrganizationConfig: vi.fn().mockResolvedValue({
-      kind: 'updated',
-      value: organization({ revision: 5 }),
-    }),
-    setOrganizationConfigEnabled: vi.fn().mockResolvedValue({
-      kind: 'updated',
-      value: organization({ revision: 5 }),
-    }),
     listDomainConfigs: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     createDomainConfig: vi.fn().mockResolvedValue(domain({ revision: 1, enabled: false })),
     findDomainConfig: vi.fn().mockResolvedValue(domain()),
+    findFirstDomainConfig: vi.fn().mockResolvedValue(domain()),
     updateDomainConfig: vi.fn().mockResolvedValue({
       kind: 'updated',
       value: domain({ revision: 4 }),
@@ -128,16 +63,6 @@ function repository(overrides: Partial<WhiteLabelRepository> = {}): WhiteLabelRe
       kind: 'updated',
       value: domain({ revision: 4 }),
     }),
-    listAssignments: vi.fn().mockResolvedValue({ items: [assignment()], total: 1 }),
-    createAssignment: vi.fn().mockResolvedValue(
-      assignment({ revision: 1, enabled: false }),
-    ),
-    findAssignment: vi.fn().mockResolvedValue(assignment()),
-    setAssignmentEnabled: vi.fn().mockResolvedValue({
-      kind: 'updated',
-      value: assignment({ revision: 8 }),
-    }),
-    resolveEnabledAssignment: vi.fn().mockResolvedValue(resolved()),
     ...overrides,
   };
 }
@@ -146,369 +71,226 @@ function verifier(session: AuthenticatedSession): SessionVerifier {
   return { verify: vi.fn().mockResolvedValue(session) };
 }
 
-function directory(
-  overrides: Partial<OrganizationDirectory> = {},
-): OrganizationDirectory {
-  return {
-    findById: vi.fn().mockResolvedValue({
-      id: ORGANIZATION_ID,
-      name: 'authoritative-acme',
-      title: 'Authoritative Acme Academy',
-    }),
-    ...overrides,
-  };
-}
-
-function adminSession(): AuthenticatedSession {
-  return {
-    userId: '8',
-    roles: ['admin'],
-    organizations: [
-      { id: ORGANIZATION_ID, name: 'acme', title: 'Acme Academy' },
-      { id: 13, name: 'second', title: 'Second Academy' },
-    ],
-  };
-}
-
-function rootSession(): AuthenticatedSession {
-  return { userId: '1', roles: ['root'], organizations: [] };
-}
+const adminSession = (): AuthenticatedSession => ({ userId: '8', roles: ['admin'] });
+const rootSession = (): AuthenticatedSession => ({ userId: '1', roles: ['root'] });
 
 function app(
   repo: WhiteLabelRepository,
   session: AuthenticatedSession = rootSession(),
-  organizationDirectory: OrganizationDirectory = directory(),
+  domainImportCatalog?: DomainImportCatalog,
 ) {
   return createApp({
     repository: repo,
     sessionVerifier: verifier(session),
-    organizationDirectory,
-    internalApiToken: INTERNAL_TOKEN,
-    a1PublicBaseUrl: A1_BASE_URL,
+    domainImportCatalog,
   });
 }
 
-describe('three-layer white-label backend', () => {
+describe('domain-only white-label backend', () => {
   it('reports database readiness', async () => {
     const response = await request(app(repository())).get('/health');
     expect(response.status).toBe(200);
-    expect(response.body.status).toBe('ok');
-  });
-
-  it('rejects authenticated users without root or admin', async () => {
-    const response = await request(app(repository(), {
-      userId: '9',
-      roles: ['user'],
-      organizations: [{ id: ORGANIZATION_ID, name: 'acme', title: 'Acme' }],
-    }))
-      .get('/api/v1/organization-configs')
-      .set('Authorization', 'Bearer session-token');
-    expect(response.status).toBe(403);
-  });
-
-  it('SQL-scopes admin organization access and writes the verified snapshot', async () => {
-    const repo = repository();
-    const service = app(repo, adminSession());
-
-    await request(service)
-      .get('/api/v1/organization-configs?page=2&pageSize=10&q=acme')
-      .set('Authorization', 'Bearer session-token')
-      .expect(200);
-    expect(repo.listOrganizationConfigs).toHaveBeenCalledWith(
-      [ORGANIZATION_ID, 13],
-      { q: 'acme', limit: 10, offset: 10 },
-    );
-
-    await request(service)
-      .post('/api/v1/organization-configs')
-      .set('Authorization', 'Bearer session-token')
-      .send({
-        organizationId: ORGANIZATION_ID,
-        config: { branding: { primaryColor: '#123456' } },
-      })
-      .expect(201);
-    expect(repo.createOrganizationConfig).toHaveBeenCalledWith({
-      organizationId: ORGANIZATION_ID,
-      organizationName: 'acme',
-      organizationTitle: 'Acme Academy',
-      schemaVersion: 1,
-      config: { branding: { primaryColor: '#123456' } },
-    }, '8');
-  });
-
-  it('prevents admin from writing another organization', async () => {
-    const repo = repository();
-    const response = await request(app(repo, adminSession()))
-      .post('/api/v1/organization-configs')
-      .set('Authorization', 'Bearer session-token')
-      .send({
-        organizationId: 999,
-        config: {},
-      });
-    expect(response.status).toBe(403);
-    expect(repo.createOrganizationConfig).not.toHaveBeenCalled();
-  });
-
-  it('rejects client-supplied organization snapshot fields', async () => {
-    const repo = repository();
-    const response = await request(app(repo, adminSession()))
-      .post('/api/v1/organization-configs')
-      .set('Authorization', 'Bearer session-token')
-      .send({
-        organizationId: ORGANIZATION_ID,
-        organizationTitle: 'Forged title',
-        config: {},
-      });
-    expect(response.status).toBe(422);
-    expect(repo.createOrganizationConfig).not.toHaveBeenCalled();
-  });
-
-  it('uses the authoritative main-platform snapshot for root organization updates', async () => {
-    const repo = repository();
-    const organizationDirectory = directory();
-    const response = await request(app(repo, rootSession(), organizationDirectory))
-      .put(`/api/v1/organization-configs/${ORGANIZATION_ID}`)
-      .set('Authorization', 'Bearer session-token')
-      .send({
-        revision: 4,
-        schemaVersion: 2,
-        config: { features: { classroom: true } },
+    expect(response.body).toEqual({
+      status: 'ok',
+      service: 'plugin-whitelabel-backend',
     });
-    expect(response.status).toBe(200);
-    expect(organizationDirectory.findById).toHaveBeenCalledWith(
-      'Bearer session-token',
-      ORGANIZATION_ID,
-    );
-    expect(repo.updateOrganizationConfig).toHaveBeenCalledWith(
-      null,
-      ORGANIZATION_ID,
-      {
-        organizationName: 'authoritative-acme',
-        organizationTitle: 'Authoritative Acme Academy',
-        revision: 4,
-        schemaVersion: 2,
-        config: { features: { classroom: true } },
-      },
-      '1',
-    );
   });
 
-  it('rejects a root organization id missing from the main platform', async () => {
+  it('resolves a public config by hostname without organization or database id', async () => {
     const repo = repository();
-    const organizationDirectory = directory({ findById: vi.fn().mockResolvedValue(null) });
-    const response = await request(app(repo, rootSession(), organizationDirectory))
-      .post('/api/v1/organization-configs')
-      .set('Authorization', 'Bearer session-token')
-      .send({
-        organizationId: 999,
-        config: {},
-      });
-    expect(response.status).toBe(422);
-    expect(response.body.error.code).toBe('ORGANIZATION_NOT_FOUND');
-    expect(repo.createOrganizationConfig).not.toHaveBeenCalled();
-  });
-
-  it('fails root writes closed when the organization directory is unavailable', async () => {
-    const repo = repository();
-    const organizationDirectory = directory({
-      findById: vi.fn().mockRejectedValue(organizationDirectoryFailure()),
-    });
-    const response = await request(app(repo, rootSession(), organizationDirectory))
-      .post('/api/v1/organization-configs')
-      .set('Authorization', 'Bearer session-token')
-      .send({ organizationId: ORGANIZATION_ID, config: {} });
-    expect(response.status).toBe(502);
-    expect(response.body.error.code).toBe('ORGANIZATION_DIRECTORY_ERROR');
-    expect(repo.createOrganizationConfig).not.toHaveBeenCalled();
-  });
-
-  it('revalidates the main-platform organization before root enables it', async () => {
-    const repo = repository();
-    const organizationDirectory = directory({
-      findById: vi.fn().mockResolvedValue(null),
-    });
-    const response = await request(app(repo, rootSession(), organizationDirectory))
-      .post(`/api/v1/organization-configs/${ORGANIZATION_ID}/enable`)
-      .set('Authorization', 'Bearer session-token')
-      .send({ revision: 4 });
-    expect(response.status).toBe(422);
-    expect(response.body.error.code).toBe('ORGANIZATION_NOT_FOUND');
-    expect(repo.setOrganizationConfigEnabled).not.toHaveBeenCalled();
-  });
-
-  it('makes domain management root-only and validates domain JSON secrets', async () => {
-    const repo = repository();
-    await request(app(repo, adminSession()))
-      .get('/api/v1/domain-configs')
-      .set('Authorization', 'Bearer session-token')
-      .expect(403);
-    expect(repo.listDomainConfigs).not.toHaveBeenCalled();
-
-    const invalid = await request(app(repo))
-      .post('/api/v1/domain-configs')
-      .set('Authorization', 'Bearer session-token')
-      .send({
-        domain: 'AR.ACME.EXAMPLE',
-        displayName: 'Acme AR',
-        config: { nested: { secrets: { key: 'must-not-be-stored' } } },
-      });
-    expect(invalid.status).toBe(422);
-    expect(repo.createDomainConfig).not.toHaveBeenCalled();
-  });
-
-  it('creates numeric domain and assignment resources disabled by default', async () => {
-    const repo = repository();
-    const service = app(repo);
-
-    const domainResponse = await request(service)
-      .post('/api/v1/domain-configs')
-      .set('Authorization', 'Bearer session-token')
-      .send({
-        domain: 'AR.ACME.EXAMPLE',
-        displayName: 'Acme AR',
-        config: { publicEndpoint: 'https://api.acme.example' },
-      });
-    expect(domainResponse.status).toBe(201);
-    expect(domainResponse.body.data).toMatchObject({
-      domainId: DOMAIN_ID,
-      enabled: false,
-    });
-    expect(repo.createDomainConfig).toHaveBeenCalledWith({
-      domain: 'ar.acme.example',
-      displayName: 'Acme AR',
-      schemaVersion: 1,
-      config: { publicEndpoint: 'https://api.acme.example' },
-    }, '1');
-
-    const assignmentResponse = await request(service)
-      .post('/api/v1/assignments')
-      .set('Authorization', 'Bearer session-token')
-      .send({ organizationId: ORGANIZATION_ID, domainId: DOMAIN_ID });
-    expect(assignmentResponse.status).toBe(201);
-    expect(assignmentResponse.body.data).toMatchObject({
-      assignmentId: ASSIGNMENT_ID,
-      organizationId: ORGANIZATION_ID,
-      domainId: DOMAIN_ID,
-      enabled: false,
-    });
-    expect(repo.createAssignment).toHaveBeenCalledWith(
-      ORGANIZATION_ID,
-      DOMAIN_ID,
-      '1',
-    );
-  });
-
-  it('lets admin read only scoped assignments and never derives QR URL from the request', async () => {
-    const repo = repository();
-    const response = await request(app(repo, adminSession()))
-      .get('/api/v1/assignments')
-      .set('Authorization', 'Bearer session-token')
-      .set('Host', 'evil.example')
-      .set('X-Forwarded-Host', 'evil.example');
-
-    expect(response.status).toBe(200);
-    expect(repo.listAssignments).toHaveBeenCalledWith(
-      [ORGANIZATION_ID, 13],
-      { limit: 20, offset: 0 },
-    );
-    expect(response.body.data.items[0].assignmentId).toBe(ASSIGNMENT_ID);
-    expect(response.body.data.items[0]).toMatchObject({
-      createdBy: '1',
-      updatedBy: '1',
-      createdAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-01-02T00:00:00.000Z',
-      organization: {
-        name: 'acme',
-        title: 'Acme Academy',
-        enabled: true,
-      },
-      domain: {
-        host: 'ar.acme.example',
-        displayName: 'Acme AR',
-        enabled: true,
-      },
-    });
-    expect(response.body.data.items[0].qrUrl).toBe(
-      'https://a1.fixed.example/v1/white-label-configs?o=12&d=34',
-    );
-  });
-
-  it('prevents admin from creating or changing assignments', async () => {
-    const repo = repository();
-    const service = app(repo, adminSession());
-
-    await request(service)
-      .post('/api/v1/assignments')
-      .set('Authorization', 'Bearer session-token')
-      .send({ organizationId: ORGANIZATION_ID, domainId: DOMAIN_ID })
-      .expect(403);
-    await request(service)
-      .post(`/api/v1/assignments/${ASSIGNMENT_ID}/enable`)
-      .set('Authorization', 'Bearer session-token')
-      .send({ revision: 7 })
-      .expect(403);
-    expect(repo.createAssignment).not.toHaveBeenCalled();
-    expect(repo.setAssignmentEnabled).not.toHaveBeenCalled();
-  });
-
-  it('returns current revision on optimistic-lock conflict', async () => {
-    const repo = repository({
-      setAssignmentEnabled: vi.fn().mockResolvedValue({
-        kind: 'revision_conflict',
-        currentRevision: 9,
-      }),
-    });
     const response = await request(app(repo))
-      .post(`/api/v1/assignments/${ASSIGNMENT_ID}/enable`)
-      .set('Authorization', 'Bearer session-token')
-      .send({ revision: 7 });
-    expect(response.status).toBe(409);
-    expect(response.body.error).toMatchObject({
-      code: 'REVISION_CONFLICT',
-      details: { currentRevision: 9 },
+      .get('/v1/white-label-configs')
+      .query({ domain: 'dev.xrugc.com' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual(domainSnapshot());
+    expect(response.body).not.toHaveProperty('organization');
+    expect(response.body).not.toHaveProperty('domainId');
+    expect(response.headers['cache-control']).toBe(
+      'public, no-cache, must-revalidate',
+    );
+    expect(repo.findFirstDomainConfig).toHaveBeenCalledWith([
+      'dev.xrugc.com',
+      'xrugc.com',
+    ]);
+  });
+
+  it('uses exact-hostname-first parent-domain precedence', async () => {
+    const matched = domain({
+      configKey: 'dev.xrugc.com',
+      config: domainSnapshot(),
     });
+    const findFirstDomainConfig = vi.fn().mockResolvedValue(matched);
+    const response = await request(app(repository({ findFirstDomainConfig })))
+      .get('/v1/white-label-configs')
+      .query({ domain: 'WWW.D.dev.xrugc.com.' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual(domainSnapshot());
+    expect(findFirstDomainConfig).toHaveBeenCalledWith([
+      'www.d.dev.xrugc.com',
+      'd.dev.xrugc.com',
+      'dev.xrugc.com',
+      'xrugc.com',
+    ]);
   });
 
-  it('requires internal token and gives every invalid combination the same 404', async () => {
-    const repo = repository({ resolveEnabledAssignment: vi.fn().mockResolvedValue(null) });
-    const service = app(repo);
+  it('normalizes an IDN hostname to ASCII before lookup and response', async () => {
+    const idnRecord = domain({
+      configKey: 'xn--bcher-kva.example',
+      config: domainSnapshot({ name: 'xn--bcher-kva.example' }),
+    });
+    const findFirstDomainConfig = vi.fn().mockResolvedValue(idnRecord);
+    const response = await request(app(repository({ findFirstDomainConfig })))
+      .get('/v1/white-label-configs')
+      .query({ domain: 'BÜCHER.example.' });
 
-    await request(service)
-      .get(`/internal/v1/white-label-configs/resolve?o=${ORGANIZATION_ID}&d=${DOMAIN_ID}`)
-      .expect(401);
-    const missing = await request(service)
-      .get(`/internal/v1/white-label-configs/resolve?o=${ORGANIZATION_ID}&d=${DOMAIN_ID}`)
-      .set('X-Internal-Token', INTERNAL_TOKEN);
-    const invalid = await request(service)
-      .get('/internal/v1/white-label-configs/resolve?o=0&d=bad')
-      .set('X-Internal-Token', INTERNAL_TOKEN);
-    expect(missing.status).toBe(404);
-    expect(invalid.status).toBe(404);
-    expect(invalid.body).toEqual(missing.body);
+    expect(response.status).toBe(200);
+    expect(response.body.name).toBe('xn--bcher-kva.example');
+    expect(findFirstDomainConfig).toHaveBeenCalledWith(['xn--bcher-kva.example']);
   });
 
-  it('returns the two independent configs directly and supports ETag revalidation', async () => {
+  it('returns an empty JSON object when no domain or parent key exists', async () => {
+    const findFirstDomainConfig = vi.fn().mockResolvedValue(null);
+    const response = await request(app(repository({ findFirstDomainConfig })))
+      .get('/v1/white-label-configs')
+      .query({ domain: 'missing.example.com' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({});
+    expect(findFirstDomainConfig.mock.calls).toEqual([
+      [['missing.example.com', 'example.com']],
+    ]);
+  });
+
+  it.each([
+    ['plugin-disabled', { enabled: false }],
+    ['snapshot-inactive', {
+      enabled: true,
+      config: domainSnapshot({ is_active: false }),
+    }],
+  ])('returns empty without parent fallback after a %s higher-priority match', async (_name, overrides) => {
+    const findFirstDomainConfig = vi.fn().mockResolvedValue(domain(overrides));
+    const response = await request(app(repository({ findFirstDomainConfig })))
+      .get('/v1/white-label-configs')
+      .query({ domain: 'd.dev.xrugc.com' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({});
+    expect(findFirstDomainConfig).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { o: '1', d: '1' },
+    { domain: 'https://dev.xrugc.com' },
+    { domain: 'dev.xrugc.com:443' },
+    { domain: 'dev.xrugc.com/path' },
+    { domain: 'dev.xrugc.com?x=1' },
+    { domain: 'user@dev.xrugc.com' },
+    { domain: 'dev..xrugc.com' },
+  ])('returns a generic 404 for a legacy or unsafe public query: %j', async (query) => {
+    const repo = repository();
+    const response = await request(app(repo))
+      .get('/v1/white-label-configs')
+      .query(query);
+    expect(response.status).toBe(404);
+    expect(response.body.error.code).toBe('NOT_FOUND');
+    expect(repo.findFirstDomainConfig).not.toHaveBeenCalled();
+  });
+
+  it('emits a strong response-derived ETag and honors If-None-Match', async () => {
     const service = app(repository());
-    const path = `/internal/v1/white-label-configs/resolve?o=${ORGANIZATION_ID}&d=${DOMAIN_ID}`;
     const first = await request(service)
-      .get(path)
-      .set('X-Internal-Token', INTERNAL_TOKEN);
-
+      .get('/v1/white-label-configs?domain=dev.xrugc.com');
     expect(first.status).toBe(200);
-    expect(first.headers.etag).toBe('"wl-o12-r4-d34-r3-a7"');
-    expect(first.headers['cache-control']).toBe('private, max-age=60');
-    expect(first.body).toEqual({
-      version: 1,
-      organization: resolved().organization,
-      domain: resolved().domain,
-    });
+    expect(first.headers.etag).toMatch(/^"wl-[A-Za-z0-9_-]+"$/);
 
     const cached = await request(service)
-      .get(path)
-      .set('X-Internal-Token', INTERNAL_TOKEN)
-      .set('If-None-Match', first.headers.etag);
+      .get('/v1/white-label-configs?domain=dev.xrugc.com')
+      .set('If-None-Match', first.headers.etag as string);
     expect(cached.status).toBe(304);
     expect(cached.text).toBe('');
   });
 
+  it('returns a fresh empty JSON response when a domain is disabled after an ETag was issued', async () => {
+    const findFirstDomainConfig = vi.fn()
+      .mockResolvedValueOnce(domain())
+      .mockResolvedValueOnce(domain({ enabled: false }));
+    const service = app(repository({ findFirstDomainConfig }));
+    const first = await request(service)
+      .get('/v1/white-label-configs?domain=dev.xrugc.com');
+    expect(first.status).toBe(200);
+
+    const disabled = await request(service)
+      .get('/v1/white-label-configs?domain=dev.xrugc.com')
+      .set('If-None-Match', first.headers.etag as string);
+    expect(disabled.status).toBe(200);
+    expect(disabled.body).toEqual({});
+    expect(disabled.headers.etag).not.toBe(first.headers.etag);
+  });
+
+  it('allows admin and root to read domains but reserves every mutation for root', async () => {
+    const repo = repository();
+    const adminService = app(repo, adminSession());
+    await request(adminService)
+      .get('/api/v1/domain-configs')
+      .set('Authorization', 'Bearer session-token')
+      .expect(200);
+    await request(adminService)
+      .get(`/api/v1/domain-configs/${DOMAIN_ID}`)
+      .set('Authorization', 'Bearer session-token')
+      .expect(200);
+    await request(adminService)
+      .post('/api/v1/domain-configs')
+      .set('Authorization', 'Bearer session-token')
+      .send({})
+      .expect(403);
+    await request(adminService)
+      .put(`/api/v1/domain-configs/${DOMAIN_ID}`)
+      .set('Authorization', 'Bearer session-token')
+      .send({})
+      .expect(403);
+    await request(adminService)
+      .post(`/api/v1/domain-configs/${DOMAIN_ID}/disable`)
+      .set('Authorization', 'Bearer session-token')
+      .send({ revision: 3 })
+      .expect(403);
+    expect(repo.createDomainConfig).not.toHaveBeenCalled();
+    expect(repo.updateDomainConfig).not.toHaveBeenCalled();
+    expect(repo.setDomainConfigEnabled).not.toHaveBeenCalled();
+  });
+
+  it('lets root create a disabled domain snapshot', async () => {
+    const response = await request(app(repository()))
+      .post('/api/v1/domain-configs')
+      .set('Authorization', 'Bearer session-token')
+      .send({ configKey: 'dev.xrugc.com', config: domainSnapshot() });
+    expect(response.status).toBe(201);
+    expect(response.headers.location).toBe(`/api/v1/domain-configs/${DOMAIN_ID}`);
+  });
+
+  it('keeps the domain import catalog root-only', async () => {
+    const catalog: DomainImportCatalog = {
+      list: vi.fn().mockResolvedValue({ source: 'fixed', items: [] }),
+    };
+    await request(app(repository(), adminSession(), catalog))
+      .get('/api/v1/domain-import-catalog')
+      .set('Authorization', 'Bearer session-token')
+      .expect(403);
+    const root = await request(app(repository(), rootSession(), catalog))
+      .get('/api/v1/domain-import-catalog')
+      .set('Authorization', 'Bearer session-token');
+    expect(root.status).toBe(200);
+    expect(root.headers['cache-control']).toBe('no-store');
+  });
+
+  it.each([
+    '/api/v1/organization-configs',
+    '/api/v1/assignments',
+  ])('does not expose retired organization runtime route %s', async (path) => {
+    await request(app(repository()))
+      .get(path)
+      .set('Authorization', 'Bearer session-token')
+      .expect(404);
+  });
 });
