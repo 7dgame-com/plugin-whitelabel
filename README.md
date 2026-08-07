@@ -142,8 +142,9 @@ hkccr.ccs.tencentyun.com/plugins/plugin-whitelabel-frontend
 hkccr.ccs.tencentyun.com/plugins/plugin-whitelabel-backend
 ```
 
-本次重构只允许在 `develop` 和开发环境验证；未完成安全确认前不得合并或部署
-`main`、`publish`、`latest`。
+生产部署使用 `deploy/frontend.production.yml` 与 `deploy/backend.production.yml`。
+前端位于插件服务器，xrteeth 与 tmrpp 各运行一个插件后端；两个后端必须连接同一个
+专用白牌数据库，不能复用主业务库账号或各自保存一份数据。
 
 ## 安全约束
 

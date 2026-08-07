@@ -21,14 +21,20 @@ describe('domain-only deployment contracts', () => {
     expect(JSON.stringify(manifest.descriptionI18n)).not.toContain('二维码')
   })
 
-  it('proxies only the host session API and plugin management API', () => {
+  it('proxies only the host session API, plugin management API, and public resolver', () => {
     const nginx = read('../../nginx.conf.template')
+    const entrypoint = read('../../docker-entrypoint.sh')
     expect(nginx).toContain('location /api/')
     expect(nginx).toContain('proxy_pass ${APP_API_1_URL}')
     expect(nginx).toContain('location ^~ /backend/api/')
     expect(nginx).toContain('location ^~ /backend/')
     expect(nginx).toContain('proxy_pass ${APP_BACKEND_1_URL}')
+    expect(nginx).toContain('location = /v1/white-label-configs')
     expect(nginx).not.toMatch(/location \^~ \/backend\/ \{[\s\S]*?proxy_pass/)
+    expect(entrypoint).toContain('APP_API_2_URL')
+    expect(entrypoint).toContain('APP_BACKEND_2_URL')
+    expect(entrypoint).toContain('error_page 502 503 504 = @api_failover')
+    expect(entrypoint).toContain('error_page 502 503 504 = @backend_failover')
   })
 
   it('documents only the access-domain to Unity JSON model', () => {
