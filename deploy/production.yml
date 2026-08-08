@@ -1,0 +1,120 @@
+services:
+  plugin-whitelabel-db:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${WHITELABEL_DB_ROOT_PASSWORD:?set WHITELABEL_DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${WHITELABEL_DB_NAME:-whitelabel}
+      MYSQL_USER: ${WHITELABEL_DB_USER:-whitelabel}
+      MYSQL_PASSWORD: ${WHITELABEL_DB_PASSWORD:?set WHITELABEL_DB_PASSWORD}
+    volumes:
+      - whitelabel_db_data:/var/lib/mysql
+    networks:
+      - whitelabel_private
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h 127.0.0.1 -u root -p$${MYSQL_ROOT_PASSWORD}",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  plugin-whitelabel-db-init:
+    image: mysql:8.4
+    restart: "no"
+    environment:
+      MYSQL_PWD: ${WHITELABEL_DB_PASSWORD:?set WHITELABEL_DB_PASSWORD}
+      WHITELABEL_DB_NAME: ${WHITELABEL_DB_NAME:-whitelabel}
+      WHITELABEL_DB_USER: ${WHITELABEL_DB_USER:-whitelabel}
+    networks:
+      - whitelabel_private
+    depends_on:
+      plugin-whitelabel-db:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -ec
+    command:
+      - |
+        mysql --protocol=TCP \
+          -h plugin-whitelabel-db \
+          -P 3306 \
+          -u "$${WHITELABEL_DB_USER}" \
+          "$${WHITELABEL_DB_NAME}" <<'SQL'
+        CREATE TABLE IF NOT EXISTS `white_label_domain_config` (
+          `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+          `domain` VARCHAR(253) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+          `display_name` VARCHAR(191) NOT NULL,
+          `config_json` JSON NOT NULL,
+          `schema_version` INT UNSIGNED NOT NULL DEFAULT 1,
+          `revision` BIGINT UNSIGNED NOT NULL DEFAULT 1,
+          `is_enabled` TINYINT(1) NOT NULL DEFAULT 0,
+          `created_by` BIGINT UNSIGNED NOT NULL,
+          `updated_by` BIGINT UNSIGNED NOT NULL,
+          `status_changed_by` BIGINT UNSIGNED NULL,
+          `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+          `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+          `status_changed_at` DATETIME(3) NULL,
+          PRIMARY KEY (`id`),
+          UNIQUE KEY `uq_domain_config_domain` (`domain`),
+          KEY `idx_domain_config_enabled` (`is_enabled`),
+          CONSTRAINT `chk_domain_config_schema_version` CHECK (`schema_version` > 0),
+          CONSTRAINT `chk_domain_config_revision` CHECK (`revision` > 0),
+          CONSTRAINT `chk_domain_config_enabled` CHECK (`is_enabled` IN (0, 1))
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        SQL
+
+  plugin-whitelabel-backend:
+    image: hkccr.ccs.tencentyun.com/plugins/plugin-whitelabel-backend:publish
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "8093"
+      DB_HOST: plugin-whitelabel-db
+      DB_PORT: "3306"
+      DB_NAME: ${WHITELABEL_DB_NAME:-whitelabel}
+      DB_USER: ${WHITELABEL_DB_USER:-whitelabel}
+      DB_PASSWORD: ${WHITELABEL_DB_PASSWORD:?set WHITELABEL_DB_PASSWORD}
+      DB_CONNECTION_LIMIT: "10"
+      MAIN_API_BASE_URL: https://api.xrteeth.com
+      MAIN_API_TIMEOUT_MS: "5000"
+      MAIN_FRONTEND_PUBLIC_BASE_URL: https://xrugc.com
+      DOMAIN_CATALOG_TIMEOUT_MS: "3000"
+    networks:
+      - whitelabel_private
+    depends_on:
+      plugin-whitelabel-db:
+        condition: service_healthy
+      plugin-whitelabel-db-init:
+        condition: service_completed_successfully
+
+  plugin-whitelabel-frontend:
+    image: hkccr.ccs.tencentyun.com/plugins/plugin-whitelabel-frontend:publish
+    restart: unless-stopped
+    environment:
+      APP_API_1_URL: https://api.xrteeth.com
+      APP_API_2_URL: https://api.tmrpp.com
+      APP_BACKEND_1_URL: http://plugin-whitelabel-backend:8093
+    networks:
+      - whitelabel_private
+      - proxy
+    depends_on:
+      - plugin-whitelabel-backend
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.plugin-whitelabel.rule=Host(`whitelabel.plugins.xrugc.com`)"
+      - "traefik.http.routers.plugin-whitelabel.entrypoints=websecure"
+      - "traefik.http.routers.plugin-whitelabel.tls=true"
+      - "traefik.http.routers.plugin-whitelabel.tls.certresolver=letsencrypt"
+      - "traefik.http.services.plugin-whitelabel.loadbalancer.server.port=80"
+
+networks:
+  whitelabel_private:
+  proxy:
+    external: true
+
+volumes:
+  whitelabel_db_data:
