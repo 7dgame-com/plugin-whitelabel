@@ -142,9 +142,9 @@ hkccr.ccs.tencentyun.com/plugins/plugin-whitelabel-frontend
 hkccr.ccs.tencentyun.com/plugins/plugin-whitelabel-backend
 ```
 
-生产部署使用 `deploy/frontend.production.yml` 与 `deploy/backend.production.yml`。
-前端位于插件服务器，xrteeth 与 tmrpp 各运行一个插件后端；两个后端必须连接同一个
-专用白牌数据库，不能复用主业务库账号或各自保存一份数据。
+生产部署使用 `deploy/production.yml`，在 `port.7dgame.com` 作为一个独立
+Portainer stack 运行前端、后端和 MySQL。插件不在 xrteeth/tmrpp 部署容器，
+不复用主业务数据库、Redis、数据卷或数据库账号。
 
 ## 安全约束
 
