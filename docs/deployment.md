@@ -13,7 +13,7 @@
 | 组件 | 变量 | 说明 |
 |---|---|---|
 | frontend | `APP_API_1_URL` / `APP_API_2_URL` | 主后端主备地址，用于 verify-token |
-| frontend | `APP_BACKEND_1_URL` / `APP_BACKEND_2_URL` | 插件后端主备 origin |
+| frontend | `APP_BACKEND_1_URL` | 同一 stack 内的插件后端 origin |
 | backend | `MAIN_API_BASE_URL` | 主后端固定 base URL |
 | backend | `MAIN_API_TIMEOUT_MS` | 管理鉴权超时 |
 | backend | `MAIN_FRONTEND_PUBLIC_BASE_URL` | 可选；root 导入使用的主前端纯 origin |
@@ -42,36 +42,29 @@ GET /v1/white-label-configs?domain=<hostname>
 接口仍必须经过 Bearer token 校验。MySQL 只在内部网络开放。
 
 公开 resolver 不经过主前端业务代码、主后端或 `yii3-a1`。生产入口 nginx 只负责把该
-精确路径转发到两个插件后端，并在 502/503/504 时从 xrteeth 切换到 tmrpp；管理 API
-继续只允许 `/backend/api/*`。
+精确路径转发到同一插件 stack 内的后端；管理 API 继续只允许
+`/backend/api/*`。主前端和主后端不承载白牌公开解析请求。
 
 ## 3. 生产拓扑
 
 ```text
 port.7dgame.com
-  └─ plugin-whitelabel-frontend:publish
-       ├─ /api/*                    -> api.xrteeth.com -> api.tmrpp.com
-       ├─ /backend/api/*            -> 插件后端 xrteeth -> tmrpp
-       └─ /v1/white-label-configs   -> 插件后端 xrteeth -> tmrpp
-
-port.xrteeth.com / port.tmrpp.com
-  └─ plugin-whitelabel-backend:publish
-       └─ 同一个专用 whitelabel MySQL database/schema
+  └─ plugin-whitelabel (Portainer stack)
+       ├─ frontend:publish
+       │    ├─ /api/*                  -> 主 API（只用于既有登录令牌校验）
+       │    ├─ /backend/api/*          -> backend:8093
+       │    └─ /v1/white-label-configs -> backend:8093
+       ├─ backend:publish
+       └─ MySQL 8.4 + 独立数据卷
 ```
 
-生产编排模板：
+生产编排模板为 `deploy/production.yml`，只部署到 `port.7dgame.com`。
+它使用内部 Docker 网络连接前端、后端和 MySQL，只把前端加入公共
+`proxy` 网络；后端和 MySQL 不发布主机端口。初始化容器会幂等地创建
+`white_label_domain_config` 表。
 
-- `deploy/frontend.production.yml` 部署到 `port.7dgame.com`；
-- `deploy/backend.production.yml` 分别部署到 xrteeth 与 tmrpp；
-- 两个后端的 `MAIN_API_BASE_URL` 分别使用本机对应的 `api.xrteeth.com` 和
-  `api.tmrpp.com`；
-- 两个后端必须使用同一组 `WHITELABEL_DB_*`，数据库必须先执行
-  `backend/db/schema.sql`；
-- 不允许复用主业务库账号，也不允许两个后端各自维护一份本地数据库。
-
-后端公开 host 应为两个独立 origin，再作为前端的 `WHITELABEL_BACKEND_1_URL` 和
-`WHITELABEL_BACKEND_2_URL`。数据库密码只放在 Portainer stack environment 中，不写入
-Compose 或仓库。
+数据库 root 密码和插件账号密码只放在 Portainer stack environment 中，
+不写入 Compose 或仓库。不允许使用主业务库账号、主 Redis 或主应用数据卷。
 
 ## 4. 主前端注册
 
