@@ -86,11 +86,11 @@ port.7dgame.com
 
 ## 5. 主前端 manifest 边界
 
-插件域名 JSON 与主前端 `web/public/config/domains/{configKey}.json` 使用同一数据结构
-和配置键语义，但保存后是两份独立数据：
+插件公开 JSON 与主前端 `web/public/config/domains/{configKey}.json` 使用同一数据结构
+和配置键语义；插件数据库则把 `configKey` 与不含 `name` 的内容分开保存：
 
 - 主前端构建发布 `/config/domains/manifest.json`；
-- root 可在插件编辑器中选择一项并一次性复制；
+- root 可在插件编辑器中选择一项；该选择同时确定键并一次性复制内容；
 - 插件不写主前端仓库，也不在运行时读取 manifest；
 - manifest 不可用不会影响已有配置解析；
 - 若新键也要影响主前端本身，仍需在主前端仓库单独增加 JSON 并发布。

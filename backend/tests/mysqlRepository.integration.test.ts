@@ -46,7 +46,6 @@ describeIntegration('MySQL domain-only white-label repository', () => {
 
   it('supports domain CRUD, optimistic revisions, and ordered candidate lookup', async () => {
     const snapshot = {
-      name: 'dev.xrugc.com',
       description: 'Integration Domain',
       is_active: true,
       fallback_domain: 'xrugc.com',
@@ -54,12 +53,12 @@ describeIntegration('MySQL domain-only white-label repository', () => {
       configs: { 'zh-CN': { title: 'Integration Domain' } },
     };
     const created = await repository.createDomainConfig({
-      configKey: snapshot.name,
+      configKey: 'dev.xrugc.com',
       schemaVersion: 1,
       config: snapshot,
     }, '9001');
     expect(created).toMatchObject({
-      configKey: snapshot.name,
+      configKey: 'dev.xrugc.com',
       displayName: snapshot.description,
       revision: 1,
       enabled: false,
@@ -67,12 +66,11 @@ describeIntegration('MySQL domain-only white-label repository', () => {
 
     const defaultSnapshot = {
       ...snapshot,
-      name: 'default',
       description: 'Default',
       fallback_domain: null,
     };
     await repository.createDomainConfig({
-      configKey: defaultSnapshot.name,
+      configKey: 'default',
       schemaVersion: 1,
       config: defaultSnapshot,
     }, '9001');
@@ -96,7 +94,6 @@ describeIntegration('MySQL domain-only white-label repository', () => {
     expect(enabled).toMatchObject({ kind: 'updated', value: { revision: 2, enabled: true } });
 
     const stale = await repository.updateDomainConfig(created.domainId, {
-      configKey: snapshot.name,
       schemaVersion: 1,
       revision: 1,
       config: { ...snapshot, description: 'Stale' },

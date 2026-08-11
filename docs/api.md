@@ -41,7 +41,6 @@ GET 允许 root 和 admin；POST、PUT、enable、disable 只允许 root。
   "configKey": "dev.xrugc.com",
   "schemaVersion": 1,
   "config": {
-    "name": "dev.xrugc.com",
     "description": "XR UGC Dev",
     "is_active": true,
     "fallback_domain": "default",
@@ -57,21 +56,21 @@ GET 允许 root 和 admin；POST、PUT、enable、disable 只允许 root。
 }
 ```
 
-创建时 `schemaVersion` 可省略并默认使用 1。`configKey` 必须与 `config.name` 完全
-相等。`domainId`、显示说明和审计字段由服务端生成。
+创建时 `schemaVersion` 可省略并默认使用 1。`configKey` 必须是主前端导入目录中当前
+可导入的键；它是唯一身份来源，创建后不可修改。`config` 禁止包含 `name`。
+`domainId`、显示说明和审计字段由服务端生成。
 
-更新使用相同字段并增加 revision：
+更新只提交内容、Schema 版本和 revision，不再提交键：
 
 ```json
 {
-  "configKey": "dev.xrugc.com",
   "schemaVersion": 1,
   "revision": 5,
   "config": {}
 }
 ```
 
-上例中的 `config` 仅为结构缩写；实际请求仍须满足完整 `StaticDomainConfig` Schema。
+上例中的 `config` 仅为结构缩写；实际请求仍须满足完整内容 Schema（不含 `name`）。
 
 启停：
 
@@ -83,7 +82,8 @@ GET 允许 root 和 admin；POST、PUT、enable、disable 只允许 root。
 
 约束：
 
-- `config.name` 是静态配置键，不是每次访问的精确 hostname；
+- 数据库 `configKey` 是静态配置键，不是每次访问的精确 hostname；
+- 公开返回时自动加入 `name = configKey`，管理端 JSON 不存 `name`；
 - `config.description` 是显示说明来源；
 - `config.is_active=false` 的记录不能启用；
 - 已启用记录不能直接保存为 `config.is_active=false`，应先停用；
@@ -121,12 +121,12 @@ GET /api/v1/domain-import-catalog
 }
 ```
 
-导入只把选中快照复制到编辑器，仍需 root 明确保存。保存后插件数据不会跟随主前端
-文件变化。
+选择目录项会同时确定不可变 `configKey` 并把对应内容载入编辑器，root 只需编辑内容并
+明确保存，不再另外填写键。保存后插件数据不会跟随主前端文件变化。
 
-目录未配置、超时或协议无效时该辅助接口返回 503；已有域名 CRUD、健康检查和公开
-解析不受影响。外部 fallback 最多物化 8 层并检测循环，不能安全物化的条目只标记为
-不可导入。
+目录未配置、超时或协议无效时该辅助接口返回 503，并暂停新建记录；已有域名的读取、
+更新、启停、健康检查和公开解析不受影响。外部 fallback 最多物化 8 层并检测循环，
+不能安全物化的条目只标记为不可导入。
 
 ## 4. Unity 公开解析
 

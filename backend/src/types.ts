@@ -20,12 +20,8 @@ export interface AuditFields {
   statusChangedAt: string | null;
 }
 
-/**
- * A complete snapshot of the main frontend's
- * public/config/domains/<configKey>.json contract.
- */
-export interface StaticDomainConfig extends JsonObject {
-  name: string;
+/** White-label content stored independently from its database identity. */
+export interface DomainConfigContent extends JsonObject {
   description: string;
   is_active: boolean;
   fallback_domain: string | null;
@@ -33,11 +29,20 @@ export interface StaticDomainConfig extends JsonObject {
   configs: { [language: string]: JsonObject };
 }
 
+/**
+ * Public Unity snapshot compatible with the main frontend's
+ * public/config/domains/<configKey>.json contract. `name` is composed from the
+ * external database key and is never stored inside config_json.
+ */
+export interface StaticDomainConfig extends DomainConfigContent {
+  name: string;
+}
+
 export interface DomainConfig extends AuditFields {
   domainId: number;
   configKey: string;
   displayName: string;
-  config: StaticDomainConfig;
+  config: DomainConfigContent;
   schemaVersion: number;
   revision: number;
   enabled: boolean;
@@ -45,11 +50,13 @@ export interface DomainConfig extends AuditFields {
 
 export interface DomainConfigInput {
   configKey: string;
-  config: StaticDomainConfig;
+  config: DomainConfigContent;
   schemaVersion: 1;
 }
 
-export interface DomainConfigUpdate extends DomainConfigInput {
+export interface DomainConfigUpdate {
+  config: DomainConfigContent;
+  schemaVersion: 1;
   revision: number;
 }
 

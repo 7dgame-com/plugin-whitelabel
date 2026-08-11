@@ -71,14 +71,17 @@ describe('domain-only deployment contracts', () => {
     const schema = read('../domain/jsonObject.ts')
 
     expect(domainDialog).toContain('<JsonObjectEditor')
-    expect(domainDialog).toContain('configKey: config.name')
-    expect(domainDialog).toContain(':read-only="readOnly"')
+    expect(domainDialog).toContain('configKey: activeConfigKey.value')
+    expect(domainDialog).toContain(
+      ':read-only="readOnly || (!record && !selectedCatalogItem)"',
+    )
     expect(domainDialog).toContain('props.record?.enabled && !config.is_active')
     expect(editor).toContain('basicSetup')
     expect(editor).toContain('jsonParseLinter')
     expect(editor).toContain('formatJsonObjectText')
     expect(editor).toContain('EditorView.editable.of(!props.readOnly)')
-    expect(schema).toContain('const domainSchema')
+    expect(schema).toContain('const domainContentSchema')
+    expect(schema).toContain('managed outside JSON as configKey')
     expect(schema).not.toContain('organizationSchema')
   })
 
@@ -86,8 +89,10 @@ describe('domain-only deployment contracts', () => {
     const domainDialog = read('../components/DomainConfigDialog.vue')
     const domainPanel = read('../components/DomainConfigsPanel.vue')
 
-    expect(domainDialog).toContain('v-if="!readOnly"')
-    expect(domainDialog).toContain('ElMessageBox.confirm')
+    expect(domainDialog).toContain('v-if="!readOnly && !record"')
+    expect(domainDialog).toContain('@change="selectCatalogConfig"')
+    expect(domainDialog).not.toContain('domain-import-button')
+    expect(domainDialog).not.toContain('ElMessageBox.confirm')
     expect(domainPanel).toContain('v-if="isRootUser"')
     expect(domainPanel).toContain(':read-only="editorReadOnly"')
     expect(domainPanel).toContain('editorReadOnly.value = !isRootUser.value')

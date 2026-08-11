@@ -3,7 +3,8 @@
 `plugin-whitelabel` 是一个独立的域名白牌配置服务。白牌结果只由当前前端的完整
 hostname 决定，与用户、账号、组织和登录方式无关。
 
-插件只保存一类数据：与主前端 `StaticDomainConfig` 同结构的域名 JSON 快照。请求
+插件只保存一类数据：一个外部配置键及其白牌 JSON 内容。公开返回时才把外部键组装为
+兼容主前端 `StaticDomainConfig` 的 `name`。请求
 `d.dev.xrugc.com` 时，插件依次查找 `d.dev.xrugc.com`、`dev.xrugc.com`、
 `xrugc.com`，返回第一条存在且可用的 JSON。
 
@@ -41,10 +42,11 @@ Unity
 
 管理端保存的是主前端静态域名配置键，而不是每一个精确 hostname：
 
-- `config.name` 是唯一 `configKey`，例如 `dev.xrugc.com`；
-- `config.description` 是只读显示说明的来源；
-- `config_json` 是完整、自包含的 `StaticDomainConfig` 快照；
-- root 可从主前端 `/config/domains/manifest.json` 选择并复制一项，保存后与主前端
+- root 创建时只能从主前端 manifest 选择一个 `configKey`，例如 `dev.xrugc.com`；
+- `configKey` 单独存储且创建后不可修改，JSON 编辑器不再包含或要求 `name`；
+- `config.description` 是列表显示说明的来源；
+- `config_json` 只保存自包含的内容字段；公开接口自动补入 `name = configKey`；
+- root 可从主前端 `/config/domains/manifest.json` 选择一项，选择动作同时确定键并载入内容，保存后与主前端
   文件独立，不会自动同步；
 - 运行时对 hostname 做小写和 IDN ASCII 规范化，再按“完整域名优先、逐级父域”的
   顺序匹配；`d.` 和 `www.` 都是普通子域，不做特殊跳过；

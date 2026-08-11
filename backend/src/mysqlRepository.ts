@@ -2,12 +2,12 @@ import type { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { conflict, unprocessable } from './errors';
 import type {
   DomainConfig,
+  DomainConfigContent,
   DomainConfigInput,
   DomainConfigUpdate,
   JsonObject,
   ListOptions,
   ListResult,
-  StaticDomainConfig,
   VersionedMutationResult,
   WhiteLabelRepository,
 } from './types';
@@ -51,8 +51,17 @@ function parseJson<Value extends JsonObject = JsonObject>(value: string | JsonOb
   return (typeof value === 'string' ? JSON.parse(value) : value) as Value;
 }
 
-function domainDisplayName(config: StaticDomainConfig): string {
-  return config.description.trim() || config.name;
+function storedDomainConfig(value: string | JsonObject): DomainConfigContent {
+  const parsed = parseJson<JsonObject>(value);
+  // Legacy rows stored identity inside config_json. The physical `domain`
+  // column is authoritative now, so old `name` values are ignored on read and
+  // disappear on the next write.
+  const { name: _legacyName, ...content } = parsed;
+  return content as DomainConfigContent;
+}
+
+function domainDisplayName(configKey: string, config: DomainConfigContent): string {
+  return config.description.trim() || configKey;
 }
 
 function toIsoUtc(value: string): string {
@@ -74,11 +83,11 @@ function auditFields(row: AuditRow) {
 }
 
 function mapDomain(row: DomainRow): DomainConfig {
-  const config = parseJson<StaticDomainConfig>(row.config_json);
+  const config = storedDomainConfig(row.config_json);
   return {
     domainId: Number(row.id),
-    configKey: config.name,
-    displayName: domainDisplayName(config),
+    configKey: row.domain,
+    displayName: domainDisplayName(row.domain, config),
     config,
     schemaVersion: Number(row.schema_version),
     revision: Number(row.revision),
@@ -91,8 +100,6 @@ function searchPattern(q: string): string {
   return `%${q.replace(/=/g, '==').replace(/%/g, '=%').replace(/_/g, '=_')}%`;
 }
 
-const configNameExpression = "JSON_UNQUOTE(JSON_EXTRACT(config_json, '$.name'))";
-
 export class MysqlWhiteLabelRepository implements WhiteLabelRepository {
   constructor(private readonly pool: Pool) {}
 
@@ -100,22 +107,13 @@ export class MysqlWhiteLabelRepository implements WhiteLabelRepository {
     await this.pool.query('SELECT 1');
   }
 
-  private async domainConfigNameExists(
-    configKey: string,
-    excludingDomainId?: number,
-  ): Promise<boolean> {
-    const parameters: SqlParameter[] = [configKey];
-    const excludeSql = excludingDomainId === undefined ? '' : 'AND id <> ?';
-    if (excludingDomainId !== undefined) {
-      parameters.push(excludingDomainId);
-    }
+  private async domainConfigKeyExists(configKey: string): Promise<boolean> {
     const [rows] = await this.pool.execute<IdRow[]>(
       `SELECT id
        FROM white_label_domain_config
-       WHERE ${configNameExpression} = ?
-         ${excludeSql}
+       WHERE domain = ?
        LIMIT 1`,
-      parameters,
+      [configKey],
     );
     return rows.length > 0;
   }
@@ -126,7 +124,7 @@ export class MysqlWhiteLabelRepository implements WhiteLabelRepository {
     if (options.q !== undefined) {
       const pattern = searchPattern(options.q);
       where.push(`(
-        ${configNameExpression} LIKE ? ESCAPE '='
+        domain LIKE ? ESCAPE '='
         OR JSON_UNQUOTE(JSON_EXTRACT(config_json, '$.description'))
           COLLATE utf8mb4_unicode_ci LIKE ? ESCAPE '='
       )`);
@@ -151,7 +149,7 @@ export class MysqlWhiteLabelRepository implements WhiteLabelRepository {
   }
 
   async createDomainConfig(input: DomainConfigInput, actorId: string): Promise<DomainConfig> {
-    if (await this.domainConfigNameExists(input.config.name)) {
+    if (await this.domainConfigKeyExists(input.configKey)) {
       throw conflict('DOMAIN_CONFIG_CONFLICT', 'The domain config key is already configured');
     }
     let result: ResultSetHeader;
@@ -162,8 +160,8 @@ export class MysqlWhiteLabelRepository implements WhiteLabelRepository {
           is_enabled, created_by, updated_by
         ) VALUES (?, ?, ?, ?, 1, 0, ?, ?)`,
         [
-          input.config.name,
-          domainDisplayName(input.config),
+          input.configKey,
+          domainDisplayName(input.configKey, input.config),
           JSON.stringify(input.config),
           input.schemaVersion,
           actorId,
@@ -199,8 +197,8 @@ export class MysqlWhiteLabelRepository implements WhiteLabelRepository {
     const [rows] = await this.pool.execute<DomainRow[]>(
       `SELECT *
        FROM white_label_domain_config
-       WHERE ${configNameExpression} IN (${placeholders})
-       ORDER BY FIELD(${configNameExpression}, ${placeholders}), id ASC
+       WHERE domain IN (${placeholders})
+       ORDER BY FIELD(domain, ${placeholders}), id ASC
        LIMIT 1`,
       [...configKeys, ...configKeys],
     );
@@ -231,33 +229,20 @@ export class MysqlWhiteLabelRepository implements WhiteLabelRepository {
         }],
       );
     }
-    if (await this.domainConfigNameExists(input.config.name, domainId)) {
-      throw conflict('DOMAIN_CONFIG_CONFLICT', 'The domain config key is already configured');
-    }
-
-    let result: ResultSetHeader;
-    try {
-      [result] = await this.pool.execute<ResultSetHeader>(
-        `UPDATE white_label_domain_config
-         SET domain = ?, display_name = ?, config_json = ?, schema_version = ?,
-             revision = revision + 1, updated_by = ?, updated_at = CURRENT_TIMESTAMP(3)
-         WHERE id = ? AND revision = ?`,
-        [
-          input.config.name,
-          domainDisplayName(input.config),
-          JSON.stringify(input.config),
-          input.schemaVersion,
-          actorId,
-          domainId,
-          input.revision,
-        ],
-      );
-    } catch (error) {
-      if (mysqlCode(error) === 'ER_DUP_ENTRY') {
-        throw conflict('DOMAIN_CONFIG_CONFLICT', 'The domain config key is already configured');
-      }
-      throw error;
-    }
+    const [result] = await this.pool.execute<ResultSetHeader>(
+      `UPDATE white_label_domain_config
+       SET display_name = ?, config_json = ?, schema_version = ?,
+           revision = revision + 1, updated_by = ?, updated_at = CURRENT_TIMESTAMP(3)
+       WHERE id = ? AND revision = ?`,
+      [
+        domainDisplayName(currentBeforeUpdate.configKey, input.config),
+        JSON.stringify(input.config),
+        input.schemaVersion,
+        actorId,
+        domainId,
+        input.revision,
+      ],
+    );
     if (result.affectedRows === 1) {
       const updated = await this.findDomainConfig(domainId);
       return updated ? { kind: 'updated', value: updated } : { kind: 'not_found' };
