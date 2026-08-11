@@ -1,8 +1,7 @@
 import type { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
-import { conflict, unprocessable } from './errors';
+import { conflict } from './errors';
 import type {
   DomainConfig,
-  DomainConfigContent,
   DomainConfigInput,
   DomainConfigUpdate,
   JsonObject,
@@ -51,17 +50,8 @@ function parseJson<Value extends JsonObject = JsonObject>(value: string | JsonOb
   return (typeof value === 'string' ? JSON.parse(value) : value) as Value;
 }
 
-function storedDomainConfig(value: string | JsonObject): DomainConfigContent {
-  const parsed = parseJson<JsonObject>(value);
-  // Legacy rows stored identity inside config_json. The physical `domain`
-  // column is authoritative now, so old `name` values are ignored on read and
-  // disappear on the next write.
-  const { name: _legacyName, ...content } = parsed;
-  return content as DomainConfigContent;
-}
-
-function domainDisplayName(configKey: string, config: DomainConfigContent): string {
-  return config.description.trim() || configKey;
+function storedDomainConfig(value: string | JsonObject): JsonObject {
+  return parseJson<JsonObject>(value);
 }
 
 function toIsoUtc(value: string): string {
@@ -87,7 +77,7 @@ function mapDomain(row: DomainRow): DomainConfig {
   return {
     domainId: Number(row.id),
     configKey: row.domain,
-    displayName: domainDisplayName(row.domain, config),
+    displayName: row.display_name || row.domain,
     config,
     schemaVersion: Number(row.schema_version),
     revision: Number(row.revision),
@@ -125,8 +115,7 @@ export class MysqlWhiteLabelRepository implements WhiteLabelRepository {
       const pattern = searchPattern(options.q);
       where.push(`(
         domain LIKE ? ESCAPE '='
-        OR JSON_UNQUOTE(JSON_EXTRACT(config_json, '$.description'))
-          COLLATE utf8mb4_unicode_ci LIKE ? ESCAPE '='
+        OR display_name COLLATE utf8mb4_unicode_ci LIKE ? ESCAPE '='
       )`);
       parameters.push(pattern, pattern);
     }
@@ -161,7 +150,7 @@ export class MysqlWhiteLabelRepository implements WhiteLabelRepository {
         ) VALUES (?, ?, ?, ?, 1, 0, ?, ?)`,
         [
           input.configKey,
-          domainDisplayName(input.configKey, input.config),
+          input.displayName,
           JSON.stringify(input.config),
           input.schemaVersion,
           actorId,
@@ -220,22 +209,12 @@ export class MysqlWhiteLabelRepository implements WhiteLabelRepository {
         currentRevision: currentBeforeUpdate.revision,
       };
     }
-    if (currentBeforeUpdate.enabled && !input.config.is_active) {
-      throw unprocessable(
-        'Disable the domain configuration before saving a snapshot with config.is_active=false',
-        [{
-          path: 'config.is_active',
-          message: 'config.is_active must remain true while the plugin domain configuration is enabled',
-        }],
-      );
-    }
     const [result] = await this.pool.execute<ResultSetHeader>(
       `UPDATE white_label_domain_config
-       SET display_name = ?, config_json = ?, schema_version = ?,
+       SET config_json = ?, schema_version = ?,
            revision = revision + 1, updated_by = ?, updated_at = CURRENT_TIMESTAMP(3)
        WHERE id = ? AND revision = ?`,
       [
-        domainDisplayName(currentBeforeUpdate.configKey, input.config),
         JSON.stringify(input.config),
         input.schemaVersion,
         actorId,
@@ -268,15 +247,6 @@ export class MysqlWhiteLabelRepository implements WhiteLabelRepository {
         kind: 'revision_conflict',
         currentRevision: currentBeforeUpdate.revision,
       };
-    }
-    if (enabled && !currentBeforeUpdate.config.is_active) {
-      throw unprocessable(
-        'A domain configuration with config.is_active=false cannot be enabled',
-        [{
-          path: 'config.is_active',
-          message: 'Set config.is_active to true before enabling this domain configuration',
-        }],
-      );
     }
     if (currentBeforeUpdate.enabled === enabled) {
       return { kind: 'unchanged', value: currentBeforeUpdate };

@@ -46,31 +46,26 @@ describeIntegration('MySQL domain-only white-label repository', () => {
 
   it('supports domain CRUD, optimistic revisions, and ordered candidate lookup', async () => {
     const snapshot = {
-      description: 'Integration Domain',
-      is_active: true,
-      fallback_domain: 'xrugc.com',
-      default_config: { homepage: 'https://dev.xrugc.com/' },
-      configs: { 'zh-CN': { title: 'Integration Domain' } },
+      name: '集成测试品牌',
+      theme: { primaryColor: '#409eff' },
     };
     const created = await repository.createDomainConfig({
       configKey: 'dev.xrugc.com',
+      displayName: 'Integration Domain',
       schemaVersion: 1,
       config: snapshot,
     }, '9001');
     expect(created).toMatchObject({
       configKey: 'dev.xrugc.com',
-      displayName: snapshot.description,
+      displayName: 'Integration Domain',
       revision: 1,
       enabled: false,
     });
 
-    const defaultSnapshot = {
-      ...snapshot,
-      description: 'Default',
-      fallback_domain: null,
-    };
+    const defaultSnapshot = { name: '默认品牌' };
     await repository.createDomainConfig({
       configKey: 'default',
+      displayName: 'Default',
       schemaVersion: 1,
       config: defaultSnapshot,
     }, '9001');
@@ -96,7 +91,7 @@ describeIntegration('MySQL domain-only white-label repository', () => {
     const stale = await repository.updateDomainConfig(created.domainId, {
       schemaVersion: 1,
       revision: 1,
-      config: { ...snapshot, description: 'Stale' },
+      config: { ...snapshot, name: '过期写入' },
     }, '9002');
     expect(stale).toMatchObject({ kind: 'revision_conflict', currentRevision: 2 });
 

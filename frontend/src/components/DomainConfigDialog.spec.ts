@@ -5,8 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import enUS from '../i18n/locales/en-US'
 import type {
   DomainConfigRecord,
-  DomainConfigContent,
   DomainImportCatalog,
+  JsonObject,
 } from '../domain/types'
 
 vi.mock('../api/whiteLabelManagement', () => ({
@@ -126,7 +126,6 @@ const JsonEditorStub = defineComponent({
   props: {
     modelValue: { type: String, required: true },
     readOnly: Boolean,
-    configKey: { type: String, default: '' },
   },
   emits: ['update:modelValue'],
   setup(props, { emit }) {
@@ -144,12 +143,9 @@ const JsonEditorStub = defineComponent({
   },
 })
 
-const importedConfig: DomainConfigContent = {
-  description: 'XR UGC agent family',
-  is_active: true,
-  fallback_domain: null,
-  default_config: { theme: 'blue' },
-  configs: {},
+const independentConfig: JsonObject = {
+  name: '主站',
+  theme: { primaryColor: '#409eff' },
 }
 
 function deferred<T>() {
@@ -171,13 +167,7 @@ function catalog(configKey: string, source: string): DomainImportCatalog {
         configKey,
         description,
         isActive: true,
-        importable: true,
-        materializedFrom: [],
-        warnings: [],
-        config: {
-          ...importedConfig,
-          description,
-        },
+        selectable: true,
       },
     ],
   }
@@ -193,8 +183,7 @@ function domainRecord(configKey: string): DomainConfigRecord {
     revision: 2,
     enabled: false,
     config: {
-      ...importedConfig,
-      description,
+      ...independentConfig,
     },
   }
 }
@@ -228,12 +217,12 @@ function mountDialog(
   })
 }
 
-describe('DomainConfigDialog main-frontend JSON import', () => {
+describe('DomainConfigDialog read-only key selection', () => {
   beforeEach(() => {
     vi.mocked(getDomainImportCatalog).mockReset()
   })
 
-  it('uses the selected catalog key as the sole identity and loads its content', async () => {
+  it('selects identity without copying source JSON, then saves manually entered content', async () => {
     vi.mocked(getDomainImportCatalog).mockResolvedValue({
       source: 'web/public/config/domains/index.json',
       items: [
@@ -241,18 +230,13 @@ describe('DomainConfigDialog main-frontend JSON import', () => {
           configKey: 'xrugc-family',
           description: 'XR UGC agent family',
           isActive: true,
-          importable: true,
-          materializedFrom: ['base.json', 'xrugc-family.json'],
-          warnings: ['fallback was materialized'],
-          config: importedConfig,
+          selectable: true,
         },
         {
           configKey: 'broken-family',
           description: 'Broken family',
           isActive: false,
-          importable: false,
-          materializedFrom: [],
-          warnings: [],
+          selectable: false,
           reason: 'Invalid source schema',
         },
       ],
@@ -273,26 +257,23 @@ describe('DomainConfigDialog main-frontend JSON import', () => {
     expect(wrapper.get('[data-testid="domain-import-details"]').text()).toContain(
       'web/public/config/domains/index.json',
     )
-    expect(wrapper.get('[data-testid="domain-import-details"]').text()).toContain(
-      'base.json',
-    )
-    expect(wrapper.get('[data-testid="domain-import-details"]').text()).toContain(
-      'fallback was materialized',
-    )
     expect(
       (wrapper.get('[data-testid="json-editor"]').element as HTMLTextAreaElement)
         .value,
-    ).toBe(JSON.stringify(importedConfig, null, 2))
+    ).toBe('{}')
     expect(wrapper.find('[data-testid="domain-import-button"]').exists()).toBe(
       false,
     )
 
+    await wrapper.get('[data-testid="json-editor"]').setValue(
+      JSON.stringify(independentConfig),
+    )
     const saveButton = wrapper.findAll('button').at(-1)
     expect(saveButton?.attributes('disabled')).toBeUndefined()
     await saveButton?.trigger('click')
     await flushPromises()
     expect(wrapper.emitted('submit')?.[0]).toEqual([
-      { configKey: 'xrugc-family', config: importedConfig },
+      { configKey: 'xrugc-family', config: independentConfig },
     ])
 
     wrapper.unmount()
@@ -336,8 +317,8 @@ describe('DomainConfigDialog main-frontend JSON import', () => {
     const editorValue = (
       wrapper.get('[data-testid="json-editor"]').element as HTMLTextAreaElement
     ).value
-    expect(editorValue).toContain('readonly.example.com description')
-    expect(editorValue).not.toContain('"name"')
+    expect(editorValue).toContain('主站')
+    expect(editorValue).toContain('"name"')
     expect(wrapper.get('[data-testid="json-editor"]').attributes('readonly')).toBe(
       '',
     )
@@ -416,9 +397,9 @@ describe('DomainConfigDialog main-frontend JSON import', () => {
     expect(wrapper.get('.domain-key-summary').text()).toContain('edited-family')
 
     const editor = wrapper.get('[data-testid="json-editor"]')
-    const editedConfig: DomainConfigContent = {
-      ...importedConfig,
-      description: 'Edited content only',
+    const editedConfig: JsonObject = {
+      ...independentConfig,
+      name: '编辑后的品牌',
     }
     await editor.setValue(JSON.stringify(editedConfig))
     await wrapper.findAll('button').at(-1)?.trigger('click')

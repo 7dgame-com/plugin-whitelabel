@@ -1,11 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('./client', () => ({
-  backendApi: {
-    get: vi.fn(),
-    post: vi.fn(),
-    put: vi.fn(),
-  },
+  backendApi: { get: vi.fn(), post: vi.fn(), put: vi.fn() },
 }))
 
 import { backendApi } from './client'
@@ -22,28 +18,14 @@ import {
 } from './whiteLabelManagement'
 
 const CONFIG_KEY = 'xrugc-family'
+const independentConfig = { name: '主站', theme: { primaryColor: '#409eff' } }
 
-function catalogConfig() {
+function catalogItem(overrides: Record<string, unknown> = {}) {
   return {
-    description: 'XR UGC agent family',
-    is_active: true,
-    fallback_domain: null,
-    default_config: { theme: 'blue' },
-    configs: {},
-  }
-}
-
-function importableCatalogItem(
-  overrides: Record<string, unknown> = {},
-): Record<string, unknown> {
-  return {
-    configKey: 'xrugc-family',
+    configKey: CONFIG_KEY,
     description: 'XR UGC agent family',
     isActive: true,
-    importable: true,
-    materializedFrom: ['base.json', 'xrugc-family.json'],
-    warnings: ['fallback was materialized'],
-    config: catalogConfig(),
+    selectable: true,
     ...overrides,
   }
 }
@@ -51,10 +33,10 @@ function importableCatalogItem(
 function catalogPayload(
   itemOverrides: Record<string, unknown> = {},
   rootOverrides: Record<string, unknown> = {},
-): Record<string, unknown> {
+) {
   return {
-    source: 'web/public/config/domains/index.json',
-    items: [importableCatalogItem(itemOverrides)],
+    source: 'https://d.xrugc.com/config/domains/manifest.json',
+    items: [catalogItem(itemOverrides)],
     ...rootOverrides,
   }
 }
@@ -67,259 +49,101 @@ describe('domain-only management API contract', () => {
   })
 
   it('lists domain JSON records with canonical pagination', async () => {
-    vi.mocked(backendApi.get).mockResolvedValue({
-      data: {
-        data: {
-          items: [
-            {
-              domainId: 8,
-              configKey: CONFIG_KEY,
-              schemaVersion: 1,
-              revision: 3,
-              enabled: true,
-              config: catalogConfig(),
-            },
-          ],
-          total: 1,
-          page: 2,
-          pageSize: 10,
-        },
-      },
-    })
-
-    const result = await listDomainConfigs({
-      q: 'xrugc',
+    vi.mocked(backendApi.get).mockResolvedValue({ data: { data: {
+      items: [{
+        domainId: 8,
+        configKey: CONFIG_KEY,
+        displayName: 'XR UGC agent family',
+        schemaVersion: 1,
+        revision: 3,
+        enabled: true,
+        config: independentConfig,
+      }],
+      total: 1,
       page: 2,
       pageSize: 10,
-    })
-
+    } } })
+    const result = await listDomainConfigs({ q: 'xrugc', page: 2, pageSize: 10 })
     expect(backendApi.get).toHaveBeenCalledWith('/domain-configs', {
       params: { q: 'xrugc', page: 2, pageSize: 10 },
     })
     expect(result.items[0]).toMatchObject({
-      domainId: 8,
-      configKey: 'xrugc-family',
-      enabled: true,
-      revision: 3,
+      configKey: CONFIG_KEY,
+      description: 'XR UGC agent family',
+      config: independentConfig,
     })
   })
 
-  it('treats the external configKey as authoritative and strips legacy JSON name', () => {
-    expect(
-      normalizeDomainConfig({
-        domainId: 8,
-        configKey: 'legacy.example.com',
-        displayName: 'Legacy',
-        schemaVersion: 1,
-        revision: 2,
-        enabled: true,
-        config: {
-          ...catalogConfig(),
-          name: 'dev.xrugc.com',
-          description: 'XR UGC Dev',
-        },
-      }),
-    ).toMatchObject({
+  it('keeps external identity separate and preserves every JSON field', () => {
+    expect(normalizeDomainConfig({
       domainId: 8,
-      configKey: 'legacy.example.com',
-      description: 'XR UGC Dev',
-      config: expect.not.objectContaining({ name: expect.anything() }),
+      configKey: 'dev.xrugc.com',
+      displayName: 'Dev site',
+      config: independentConfig,
+    })).toMatchObject({
+      configKey: 'dev.xrugc.com',
+      description: 'Dev site',
+      config: independentConfig,
     })
   })
 
   it('loads one domain record for full JSON viewing', async () => {
     vi.mocked(backendApi.get).mockResolvedValue({
-      data: { data: { domainId: 8, config: catalogConfig() } },
+      data: { data: { domainId: 8, config: independentConfig } },
     })
-
-    const result = await getDomainConfig(8)
-
+    expect((await getDomainConfig(8)).config).toEqual(independentConfig)
     expect(backendApi.get).toHaveBeenCalledWith('/domain-configs/8')
-    expect(result.config).toEqual(catalogConfig())
   })
 
-  it('creates, updates, and toggles a domain record with revision locking', async () => {
-    const config = catalogConfig()
+  it('creates, updates, and toggles with revision locking', async () => {
     vi.mocked(backendApi.post).mockResolvedValue({ data: { data: {} } })
     vi.mocked(backendApi.put).mockResolvedValue({ data: { data: {} } })
-
-    await createDomainConfig({
+    await createDomainConfig({ configKey: CONFIG_KEY, schemaVersion: 1, config: independentConfig })
+    await updateDomainConfig(8, { schemaVersion: 1, revision: 5, config: independentConfig })
+    await setDomainConfigEnabled(8, true, 6)
+    expect(backendApi.post).toHaveBeenNthCalledWith(1, '/domain-configs', {
       configKey: CONFIG_KEY,
       schemaVersion: 1,
-      config,
-    })
-    await updateDomainConfig(8, {
-      schemaVersion: 1,
-      revision: 5,
-      config,
-    })
-    await setDomainConfigEnabled(8, true, 6)
-
-    expect(backendApi.post).toHaveBeenNthCalledWith(1, '/domain-configs', {
-      configKey: 'xrugc-family',
-      schemaVersion: 1,
-      config,
+      config: independentConfig,
     })
     expect(backendApi.put).toHaveBeenCalledWith('/domain-configs/8', {
       schemaVersion: 1,
       revision: 5,
-      config,
+      config: independentConfig,
     })
-    expect(backendApi.post).toHaveBeenNthCalledWith(
-      2,
-      '/domain-configs/8/enable',
-      { revision: 6 },
-    )
+    expect(backendApi.post).toHaveBeenNthCalledWith(2, '/domain-configs/8/enable', { revision: 6 })
   })
 
-  it('loads and normalizes the one-time main-frontend import catalog', async () => {
-    const config = catalogConfig()
+  it('loads a read-only key catalog without source JSON', async () => {
     vi.mocked(backendApi.get).mockResolvedValue({ data: { data: catalogPayload() } })
-
     const result = await getDomainImportCatalog()
-
     expect(backendApi.get).toHaveBeenCalledWith('/domain-import-catalog')
-    expect(result).toEqual({
-      source: 'web/public/config/domains/index.json',
-      items: [
-        {
-          configKey: 'xrugc-family',
-          description: 'XR UGC agent family',
-          isActive: true,
-          importable: true,
-          materializedFrom: ['base.json', 'xrugc-family.json'],
-          warnings: ['fallback was materialized'],
-          config,
-        },
-      ],
-    })
+    expect(result.items).toEqual([catalogItem()])
+    expect(result.items[0]).not.toHaveProperty('config')
   })
 
-  it('accepts an exact nonimportable item without fabricating config', () => {
-    expect(
-      normalizeDomainImportCatalogItem({
-        configKey: 'broken-family',
-        description: 'Broken family',
-        isActive: false,
-        importable: false,
-        materializedFrom: ['base.json'],
-        warnings: ['invalid schema'],
-        reason: 'The source JSON is invalid',
-      }),
-    ).toEqual({
-      configKey: 'broken-family',
-      description: 'Broken family',
+  it('accepts an inactive non-selectable key with a reason', () => {
+    expect(normalizeDomainImportCatalogItem(catalogItem({
       isActive: false,
-      importable: false,
-      materializedFrom: ['base.json'],
-      warnings: ['invalid schema'],
-      reason: 'The source JSON is invalid',
-    })
+      selectable: false,
+      reason: 'Inactive',
+    }))).toEqual(catalogItem({
+      isActive: false,
+      selectable: false,
+      reason: 'Inactive',
+    }))
   })
 
   it.each([
-    ['source', catalogPayload({}, { source: 42 }), /catalog\.source/],
-    ['items', catalogPayload({}, { items: {} }), /catalog\.items/],
-    ['empty items', { source: 'source', items: [] }, /at least one item/],
-    ['item', { source: 'source', items: [null] }, /items\[0\]/],
+    ['source', catalogPayload({}, { source: 42 }), /source/],
+    ['items', catalogPayload({}, { items: {} }), /items/],
+    ['empty items', { source: 'source', items: [] }, /at least one/],
     ['configKey', catalogPayload({ configKey: 42 }), /configKey/],
     ['description', catalogPayload({ description: null }), /description/],
     ['isActive', catalogPayload({ isActive: 1 }), /isActive/],
-    ['importable', catalogPayload({ importable: 'true' }), /importable/],
-    [
-      'materializedFrom',
-      catalogPayload({ materializedFrom: ['base.json', 42] }),
-      /materializedFrom\[1\]/,
-    ],
-    ['warnings', catalogPayload({ warnings: 'warning' }), /warnings/],
-  ])('rejects a catalog with a non-exact %s field', (_field, value, message) => {
-    expect(() => normalizeDomainImportCatalog(value)).toThrow(message)
-  })
-
-  it.each([
-    ['missing config', catalogPayload({ config: undefined }), /config/],
-    [
-      'schema-invalid config',
-      catalogPayload({
-        config: {
-          description: 'XR UGC agent family',
-          is_active: true,
-          fallback_domain: null,
-          default_config: {},
-        },
-      }),
-      /domain config content/,
-    ],
-    [
-      'unsafe config',
-      catalogPayload({
-        config: {
-          ...catalogConfig(),
-          default_config: { apiToken: 'must not be imported' },
-        },
-      }),
-      /domain config content/,
-    ],
-    [
-      'duplicate JSON identity',
-      catalogPayload({
-        config: { ...catalogConfig(), name: CONFIG_KEY },
-      }),
-      /managed outside JSON/,
-    ],
-    [
-      'description mismatch',
-      catalogPayload({
-        config: { ...catalogConfig(), description: 'Different' },
-      }),
-      /config\.description/,
-    ],
-    [
-      'isActive mismatch',
-      catalogPayload({
-        config: { ...catalogConfig(), is_active: false },
-      }),
-      /config\.is_active/,
-    ],
-  ])('rejects importable catalog item with %s', (_case, value, message) => {
-    expect(() => normalizeDomainImportCatalog(value)).toThrow(message)
-  })
-
-  it.each([
-    [
-      'missing reason',
-      {
-        configKey: 'broken-family',
-        description: 'Broken family',
-        isActive: false,
-        importable: false,
-        materializedFrom: [],
-        warnings: [],
-      },
-      /reason/,
-    ],
-    [
-      'invalid warnings',
-      {
-        configKey: 'broken-family',
-        description: 'Broken family',
-        isActive: false,
-        importable: false,
-        materializedFrom: [],
-        warnings: [null],
-        reason: 'Unavailable',
-      },
-      /warnings/,
-    ],
-  ])('rejects nonimportable item with %s', (_case, value, message) => {
-    expect(() => normalizeDomainImportCatalogItem(value)).toThrow(message)
-  })
-
-  it('rejects a corrupted 200 response instead of returning an empty catalog', async () => {
-    vi.mocked(backendApi.get).mockResolvedValue({
-      data: catalogPayload({ isActive: 'true' }),
-    })
-
-    await expect(getDomainImportCatalog()).rejects.toThrow(/isActive/)
+    ['selectable', catalogPayload({ selectable: 'true' }), /selectable/],
+    ['missing reason', catalogPayload({ selectable: false }), /reason/],
+  ])('rejects an invalid catalog %s', (_name, value, pattern) => {
+    expect(() => normalizeDomainImportCatalog(value)).toThrow(pattern)
   })
 })

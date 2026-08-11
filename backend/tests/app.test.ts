@@ -5,7 +5,7 @@ import type { DomainImportCatalog } from '../src/domainImportCatalog';
 import type {
   AuthenticatedSession,
   DomainConfig,
-  DomainConfigContent,
+  JsonObject,
   SessionVerifier,
   WhiteLabelRepository,
 } from '../src/types';
@@ -21,14 +21,12 @@ const audit = {
 };
 
 function domainContent(
-  overrides: Partial<DomainConfigContent> = {},
-): DomainConfigContent {
+  overrides: JsonObject = {},
+): JsonObject {
   return {
-    description: 'XR UGC Dev',
-    is_active: true,
-    fallback_domain: 'xrugc.com',
-    default_config: { homepage: 'https://dev.xrugc.com/' },
-    configs: { 'zh-CN': { title: 'XR UGC Dev' } },
+    name: '主站',
+    theme: { primaryColor: '#409eff' },
+    logoUrl: 'https://cdn.example/logo.webp',
     ...overrides,
   };
 }
@@ -47,28 +45,22 @@ function domain(overrides: Partial<DomainConfig> = {}): DomainConfig {
   };
 }
 
-function publicSnapshot(
-  configKey = 'dev.xrugc.com',
-  overrides: Partial<DomainConfigContent> = {},
-) {
-  return { name: configKey, ...domainContent(overrides) };
+function publicSnapshot(overrides: JsonObject = {}) {
+  return domainContent(overrides);
 }
 
 function catalogFor(
   configKey = 'dev.xrugc.com',
-  config: DomainConfigContent = domainContent(),
+  config: JsonObject = domainContent(),
 ): DomainImportCatalog {
   return {
     list: vi.fn().mockResolvedValue({
       source: 'fixed',
       items: [{
         configKey,
-        description: config.description,
-        isActive: config.is_active,
-        importable: true,
-        materializedFrom: [],
-        warnings: [],
-        config,
+        description: 'XR UGC Dev',
+        isActive: true,
+        selectable: true,
       }],
     }),
   };
@@ -172,26 +164,29 @@ describe('domain-only white-label backend', () => {
       .query({ domain: 'BÜCHER.example.' });
 
     expect(response.status).toBe(200);
-    expect(response.body.name).toBe('xn--bcher-kva.example');
+    expect(response.body.name).toBe('主站');
     expect(findFirstDomainConfig).toHaveBeenCalledWith(['xn--bcher-kva.example']);
   });
 
-  it('always composes the public name from the authoritative external key', async () => {
-    const legacyRecord = domain({
+  it('returns the independently stored JSON without rewriting its name', async () => {
+    const brandedRecord = domain({
       configKey: 'dev.xrugc.com',
       config: {
         ...domainContent(),
-        name: 'stale.example.com',
-      } as DomainConfigContent,
+        name: '中文品牌名',
+      },
     });
     const response = await request(app(repository({
-      findFirstDomainConfig: vi.fn().mockResolvedValue(legacyRecord),
+      findFirstDomainConfig: vi.fn().mockResolvedValue(brandedRecord),
     })))
       .get('/v1/white-label-configs')
       .query({ domain: 'dev.xrugc.com' });
 
     expect(response.status).toBe(200);
-    expect(response.body.name).toBe('dev.xrugc.com');
+    expect(response.body).toEqual({
+      ...domainContent(),
+      name: '中文品牌名',
+    });
   });
 
   it('returns an empty JSON object when no domain or parent key exists', async () => {
@@ -207,14 +202,8 @@ describe('domain-only white-label backend', () => {
     ]);
   });
 
-  it.each([
-    ['plugin-disabled', { enabled: false }],
-    ['snapshot-inactive', {
-      enabled: true,
-      config: domainContent({ is_active: false }),
-    }],
-  ])('returns empty without parent fallback after a %s higher-priority match', async (_name, overrides) => {
-    const findFirstDomainConfig = vi.fn().mockResolvedValue(domain(overrides));
+  it('returns empty without parent fallback after a plugin-disabled higher-priority match', async () => {
+    const findFirstDomainConfig = vi.fn().mockResolvedValue(domain({ enabled: false }));
     const response = await request(app(repository({ findFirstDomainConfig })))
       .get('/v1/white-label-configs')
       .query({ domain: 'd.dev.xrugc.com' });
@@ -222,6 +211,16 @@ describe('domain-only white-label backend', () => {
     expect(response.status).toBe(200);
     expect(response.body).toEqual({});
     expect(findFirstDomainConfig).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not interpret content fields as plugin enable state', async () => {
+    const config = domainContent({ is_active: false });
+    const findFirstDomainConfig = vi.fn().mockResolvedValue(domain({ config }));
+    const response = await request(app(repository({ findFirstDomainConfig })))
+      .get('/v1/white-label-configs')
+      .query({ domain: 'dev.xrugc.com' });
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual(config);
   });
 
   it.each([
@@ -304,16 +303,23 @@ describe('domain-only white-label backend', () => {
     expect(repo.setDomainConfigEnabled).not.toHaveBeenCalled();
   });
 
-  it('lets root create a disabled domain snapshot', async () => {
-    const response = await request(app(repository(), rootSession(), catalogFor()))
+  it('lets root create independent JSON under a selected read-only key', async () => {
+    const repo = repository();
+    const response = await request(app(repo, rootSession(), catalogFor()))
       .post('/api/v1/domain-configs')
       .set('Authorization', 'Bearer session-token')
       .send({ configKey: 'dev.xrugc.com', config: domainContent() });
     expect(response.status).toBe(201);
     expect(response.headers.location).toBe(`/api/v1/domain-configs/${DOMAIN_ID}`);
+    expect(repo.createDomainConfig).toHaveBeenCalledWith({
+      configKey: 'dev.xrugc.com',
+      displayName: 'XR UGC Dev',
+      schemaVersion: 1,
+      config: domainContent(),
+    }, '1');
   });
 
-  it('refuses creation without an importable catalog key', async () => {
+  it('refuses creation without a selectable catalog key', async () => {
     const repo = repository();
     const unavailable = await request(app(repo))
       .post('/api/v1/domain-configs')

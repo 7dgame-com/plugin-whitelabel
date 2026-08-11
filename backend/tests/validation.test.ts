@@ -2,12 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   configJsonSchema,
   createDomainConfigSchema,
-  domainConfigContentSchema,
   domainConfigCandidates,
   domainConfigKeySchema,
   requestedDomainSchema,
   resolveQuerySchema,
-  staticDomainConfigSchema,
   updateDomainConfigSchema,
 } from '../src/validation';
 
@@ -58,7 +56,7 @@ describe('white-label JSON validation', () => {
   });
 });
 
-describe('main-frontend domain config validation', () => {
+describe('external key and independent JSON validation', () => {
   const snapshot = {
     name: 'dev.xrugc.com',
     description: 'XR UGC Dev',
@@ -88,58 +86,18 @@ describe('main-frontend domain config validation', () => {
     expect(domainConfigKeySchema.safeParse('dev.xrugc.com').success).toBe(true);
   });
 
-  it('requires the complete StaticDomainConfig shape and allows future public fields', () => {
-    const parsed = staticDomainConfigSchema.safeParse({
-      ...snapshot,
-      future_public_field: { enabled: true },
-    });
-    expect(parsed.success).toBe(true);
-    if (parsed.success) {
-      expect(parsed.data.future_public_field).toEqual({ enabled: true });
-    }
-    expect(staticDomainConfigSchema.safeParse({
-      ...snapshot,
-      configs: undefined,
-    }).success).toBe(false);
-  });
-
-  it('stores configKey outside managed JSON and rejects duplicate name', () => {
+  it('stores configKey outside JSON while allowing name as independent brand data', () => {
     expect(createDomainConfigSchema.safeParse({
       configKey,
-      config: content,
+      config: { name: '主站', theme: { primaryColor: '#409eff' } },
     }).success).toBe(true);
-    expect(domainConfigContentSchema.safeParse(snapshot).success).toBe(false);
   });
 
-  it('applies recursive secret checks to the full domain snapshot', () => {
-    expect(staticDomainConfigSchema.safeParse({
-      ...snapshot,
-      default_config: { nested: { accessToken: 'must-not-be-stored' } },
+  it('applies recursive secret checks to independent JSON', () => {
+    expect(createDomainConfigSchema.safeParse({
+      configKey,
+      config: { nested: { accessToken: 'must-not-be-stored' } },
     }).success).toBe(false);
-  });
-
-  it('requires external fallback snapshots to contain local Unity config data', () => {
-    expect(staticDomainConfigSchema.safeParse({
-      ...snapshot,
-      default_config: {},
-      configs: {},
-    }).success).toBe(false);
-    expect(staticDomainConfigSchema.safeParse({
-      ...snapshot,
-      default_config: {},
-      configs: { 'zh-CN': {} },
-    }).success).toBe(false);
-    expect(staticDomainConfigSchema.safeParse({
-      ...snapshot,
-      fallback_domain: snapshot.name,
-      default_config: {},
-      configs: {},
-    }).success).toBe(true);
-    expect(staticDomainConfigSchema.safeParse({
-      ...snapshot,
-      default_config: {},
-      configs: { 'zh-CN': { title: 'Local data' } },
-    }).success).toBe(true);
   });
 
   it('defaults domain creates to schema v1 and requires explicit v1 on updates', () => {
