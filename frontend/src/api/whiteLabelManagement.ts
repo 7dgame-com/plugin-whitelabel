@@ -1,7 +1,6 @@
 import { backendApi } from './client'
 import type {
   CreateDomainConfigInput,
-  DomainConfigContent,
   DomainImportCatalog,
   DomainImportCatalogItem,
   DomainConfigRecord,
@@ -10,7 +9,6 @@ import type {
   PagedResult,
   UpdateDomainConfigInput,
 } from '../domain/types'
-import { validateJsonObjectValue } from '../domain/jsonObject'
 
 type UnknownRecord = Record<string, unknown>
 
@@ -64,14 +62,11 @@ export function normalizeDomainConfig(value: unknown): DomainConfigRecord {
     raw.configKey,
     raw.domainConfigKey,
     raw.domain,
-    rawConfig.name,
   )
-  const { name: _legacyName, ...config } = rawConfig
   return {
     domainId: numberValue(raw.domainId),
     configKey,
     description: stringValue(
-      config.description,
       raw.description,
       raw.domainDescription,
       raw.displayName,
@@ -79,7 +74,7 @@ export function normalizeDomainConfig(value: unknown): DomainConfigRecord {
     ),
     schemaVersion: numberValue(raw.schemaVersion),
     revision: numberValue(raw.revision),
-    config: config as DomainConfigContent,
+    config: rawConfig,
     enabled: booleanValue(raw.enabled),
     ...timestamps(raw),
   }
@@ -112,40 +107,8 @@ function catalogBoolean(value: unknown, path: string): boolean {
   return value
 }
 
-function catalogStringArray(value: unknown, path: string): string[] {
-  if (!Array.isArray(value)) {
-    throw catalogContractError(path, 'must be an array of strings')
-  }
-  const invalidIndex = value.findIndex((item) => typeof item !== 'string')
-  if (invalidIndex >= 0) {
-    throw catalogContractError(
-      `${path}[${invalidIndex}]`,
-      'must be a string',
-    )
-  }
-  return value as string[]
-}
-
 function hasOwn(record: UnknownRecord, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(record, key)
-}
-
-function catalogDomainConfig(
-  value: unknown,
-  path: string,
-  configKey: string,
-): DomainConfigContent {
-  const result = validateJsonObjectValue(value, configKey)
-  if (!result.valid) {
-    const details = result.issues
-      .map((issue) => `${issue.path}: ${issue.message}`)
-      .join('; ')
-    throw catalogContractError(
-      path,
-      `must be valid domain config content (${details})`,
-    )
-  }
-  return result.value
 }
 
 export function normalizeDomainImportCatalogItem(
@@ -159,60 +122,24 @@ export function normalizeDomainImportCatalogItem(
     `${path}.description`,
   )
   const isActive = catalogBoolean(raw.isActive, `${path}.isActive`)
-  const importable = catalogBoolean(
-    raw.importable,
-    `${path}.importable`,
-  )
-  const materializedFrom = catalogStringArray(
-    raw.materializedFrom,
-    `${path}.materializedFrom`,
-  )
-  const warnings = catalogStringArray(raw.warnings, `${path}.warnings`)
+  const selectable = catalogBoolean(raw.selectable, `${path}.selectable`)
   const hasReason = hasOwn(raw, 'reason')
   const reason = hasReason
     ? catalogString(raw.reason, `${path}.reason`)
     : undefined
-  const hasConfig = hasOwn(raw, 'config')
-  const config = hasConfig
-    ? catalogDomainConfig(raw.config, `${path}.config`, configKey)
-    : undefined
-
-  if (!importable && (!reason || reason.trim() === '')) {
+  if (!selectable && (!reason || reason.trim() === '')) {
     throw catalogContractError(
       `${path}.reason`,
-      'must be a non-empty string when importable is false',
+      'must be a non-empty string when selectable is false',
     )
-  }
-  if (importable && !config) {
-    throw catalogContractError(
-      `${path}.config`,
-      'is required when importable is true',
-    )
-  }
-  if (importable && config) {
-    if (config.description !== description) {
-      throw catalogContractError(
-        `${path}.config.description`,
-        'must exactly match description',
-      )
-    }
-    if (config.is_active !== isActive) {
-      throw catalogContractError(
-        `${path}.config.is_active`,
-        'must exactly match isActive',
-      )
-    }
   }
 
   return {
     configKey,
     description,
     isActive,
-    importable,
-    materializedFrom,
-    warnings,
+    selectable,
     ...(reason !== undefined ? { reason } : {}),
-    ...(config !== undefined ? { config } : {}),
   }
 }
 

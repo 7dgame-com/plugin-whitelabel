@@ -65,7 +65,7 @@ describe('domain-only deployment contracts', () => {
     expect(domainPanel.match(/schemaVersion: 1/g)).toHaveLength(2)
   })
 
-  it('uses one domain-schema JSON editor for Unity snapshots', () => {
+  it('uses one secure generic JSON editor for independent Unity content', () => {
     const domainDialog = read('../components/DomainConfigDialog.vue')
     const editor = read('../components/JsonObjectEditor.vue')
     const schema = read('../domain/jsonObject.ts')
@@ -75,13 +75,13 @@ describe('domain-only deployment contracts', () => {
     expect(domainDialog).toContain(
       ':read-only="readOnly || (!record && !selectedCatalogItem)"',
     )
-    expect(domainDialog).toContain('props.record?.enabled && !config.is_active')
+    expect(domainDialog).toContain('function emptyDomainConfig(): JsonObject')
     expect(editor).toContain('basicSetup')
     expect(editor).toContain('jsonParseLinter')
     expect(editor).toContain('formatJsonObjectText')
     expect(editor).toContain('EditorView.editable.of(!props.readOnly)')
-    expect(schema).toContain('const domainContentSchema')
-    expect(schema).toContain('managed outside JSON as configKey')
+    expect(schema).toContain('validateJsonObjectValue')
+    expect(schema).not.toContain('domainContentSchema')
     expect(schema).not.toContain('organizationSchema')
   })
 

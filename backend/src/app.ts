@@ -23,12 +23,10 @@ import type {
   DomainConfigInput,
   JsonObject,
   SessionVerifier,
-  StaticDomainConfig,
   VersionedMutationResult,
   WhiteLabelRepository,
 } from './types';
 import {
-  assertSelfContainedDomainConfigContent,
   createDomainConfigSchema,
   domainConfigCandidates,
   listQuerySchema,
@@ -50,7 +48,7 @@ interface ManagementContext {
   isRoot: boolean;
 }
 
-type PublicWhiteLabelResponse = StaticDomainConfig | JsonObject;
+type PublicWhiteLabelResponse = JsonObject;
 
 type AsyncRequestHandler = (
   request: Request,
@@ -166,7 +164,7 @@ function createManagementAuth(sessionVerifier: SessionVerifier): RequestHandler 
 async function requireCatalogConfigKey(
   catalog: DomainImportCatalog | undefined,
   configKey: string,
-): Promise<void> {
+): Promise<{ configKey: string; description: string }> {
   if (!catalog) {
     throw domainCatalogUnavailable();
   }
@@ -177,15 +175,16 @@ async function requireCatalogConfigKey(
     throw domainCatalogUnavailable();
   }
   const selected = items.find((item) => item.configKey === configKey);
-  if (!selected?.importable || !selected.config) {
+  if (!selected?.selectable) {
     throw unprocessable(
-      'Select an importable configuration key from the main frontend catalog',
+      'Select an active configuration key from the main frontend catalog',
       [{
         path: 'configKey',
-        message: 'configKey must come from an importable main frontend catalog entry',
+        message: 'configKey must come from an active main frontend catalog entry',
       }],
     );
   }
+  return selected;
 }
 
 function createDomainRouter(
@@ -203,9 +202,10 @@ function createDomainRouter(
   router.post('/', asyncHandler(async (request, response) => {
     const context = requireRoot(response);
     const body = parseInput(createDomainConfigSchema, request.body);
-    await requireCatalogConfigKey(catalog, body.configKey);
+    const catalogItem = await requireCatalogConfigKey(catalog, body.configKey);
     const input: DomainConfigInput = {
       configKey: body.configKey,
+      displayName: catalogItem.description.trim() || body.configKey,
       schemaVersion: body.schemaVersion,
       config: body.config,
     };
@@ -229,19 +229,6 @@ function createDomainRouter(
     const context = requireRoot(response);
     const domainId = parseInput(positiveIdSchema, request.params.domainId);
     const body = parseInput(updateDomainConfigSchema, request.body);
-    const current = await repository.findDomainConfig(domainId);
-    if (current?.revision === body.revision) {
-      assertSelfContainedDomainConfigContent(current.configKey, body.config);
-      if (!body.config.is_active && current.enabled) {
-        throw unprocessable(
-          'Disable the domain configuration before saving a snapshot with config.is_active=false',
-          [{
-            path: 'config.is_active',
-            message: 'config.is_active must remain true while the plugin domain configuration is enabled',
-          }],
-        );
-      }
-    }
     const result = await repository.updateDomainConfig(
       domainId,
       body,
@@ -255,18 +242,6 @@ function createDomainRouter(
       const context = requireRoot(response);
       const domainId = parseInput(positiveIdSchema, request.params.domainId);
       const body = parseInput(revisionBodySchema, request.body);
-      if (enabled) {
-        const current = await repository.findDomainConfig(domainId);
-        if (current?.revision === body.revision && !current.config.is_active) {
-          throw unprocessable(
-            'A domain configuration with config.is_active=false cannot be enabled',
-            [{
-              path: 'config.is_active',
-              message: 'Set config.is_active to true before enabling this domain configuration',
-            }],
-          );
-        }
-      }
       const result = await repository.setDomainConfigEnabled(
         domainId,
         body.revision,
@@ -316,14 +291,11 @@ function createPublicResolverRouter(repository: WhiteLabelRepository): express.R
     const record = await repository.findFirstDomainConfig(candidates);
     // A configured higher-priority match is authoritative. Disabled records
     // deliberately block parent fallback instead of being skipped.
-    if (!record || !record.enabled || !record.config.is_active) {
+    if (!record || !record.enabled) {
       sendPublicConfig(request, response, {});
       return;
     }
-    sendPublicConfig(request, response, {
-      ...record.config,
-      name: record.configKey,
-    });
+    sendPublicConfig(request, response, record.config);
   }));
 
   return router;

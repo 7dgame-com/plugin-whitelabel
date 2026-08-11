@@ -6,29 +6,12 @@ export type JsonValue =
 export type JsonObject = { [key: string]: JsonValue }
 export type WhiteLabelSchemaVersion = 1
 
-/** Editable white-label content. Identity is stored separately as configKey. */
-export interface DomainConfigContent extends JsonObject {
-  description: string
-  is_active: boolean
-  fallback_domain: string | null
-  default_config: JsonObject
-  configs: { [locale: string]: JsonObject }
-}
-
-/** Source/public contract compatible with web/public/config/domains/*.json. */
-export interface StaticDomainConfig extends DomainConfigContent {
-  name: string
-}
-
 export interface DomainImportCatalogItem {
   configKey: string
   description: string
   isActive: boolean
-  importable: boolean
-  materializedFrom: string[]
-  warnings: string[]
+  selectable: boolean
   reason?: string
-  config?: DomainConfigContent
 }
 
 export interface DomainImportCatalog {
@@ -42,7 +25,7 @@ export interface DomainConfigRecord {
   description: string
   schemaVersion: number
   revision: number
-  config: DomainConfigContent
+  config: JsonObject
   enabled: boolean
   createdAt?: string
   updatedAt?: string
@@ -51,12 +34,12 @@ export interface DomainConfigRecord {
 export interface CreateDomainConfigInput {
   configKey: string
   schemaVersion: WhiteLabelSchemaVersion
-  config: DomainConfigContent
+  config: JsonObject
 }
 
 export interface UpdateDomainConfigInput {
   schemaVersion: WhiteLabelSchemaVersion
-  config: DomainConfigContent
+  config: JsonObject
   revision: number
 }
 

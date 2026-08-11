@@ -1,107 +1,44 @@
 # White-label backend
 
-This service owns one independently versioned resource: a domain-family JSON
-snapshot with the main frontend's `StaticDomainConfig` semantics. White-label
-resolution is domain-only; organization and login context belong to other
-systems and are never stored, queried, or returned here.
+The backend owns one resource: an immutable external `configKey` plus an
+independent public JSON object. Domain resolution does not use organization or
+login context.
 
-The service does not read the main-platform database. Management Bearer tokens
-are verified through the fixed main API `verify-token` endpoint. The optional
-main-frontend domain catalog is a root-only import helper; saved JSON is an
-independent snapshot and public resolution never calls the main frontend.
+## Data boundary
 
-## Security and permissions
+- `configKey` must be selected from the fixed main-frontend manifest summary.
+- The catalog reads only `configKey`, `description`, and `isActive`; source JSON
+  is never returned, copied, or synchronized.
+- Root authors `config` independently. It is stored and returned unchanged.
+- A JSON `name` field is ordinary brand content and may contain Chinese text.
+- Plugin enable state is the database `is_enabled` column. JSON fields do not
+  control operational status.
+- Existing `config_json` values are preserved without destructive migration.
 
-- `root` and `admin` may list and inspect domain records.
-- Only `root` may create, update, enable, disable, or use the import catalog.
-- New records are disabled and every mutation uses optimistic `revision` checks.
-- `configKey` is selected from the fixed main-frontend catalog, stored outside
-  JSON, and immutable after creation. A `name` field in editable JSON is
-  rejected. Secret-bearing fields are rejected recursively and snapshots are
-  size/depth constrained.
-- An enabled database record must also have `config.is_active === true` before
-  it is publicly resolvable.
-- There are no delete routes.
+## Permissions and API
 
-## Management API
+- root/admin: `GET /api/v1/domain-configs` and record detail;
+- root only: create, update, enable, disable, and key catalog;
+- public: `GET /v1/white-label-configs?domain=d.dev.xrugc.com`.
 
-- `GET /api/v1/domain-import-catalog` — root only; optional import candidates
-- `GET /api/v1/domain-configs` — root/admin
-- `POST /api/v1/domain-configs` — root only
-- `GET /api/v1/domain-configs/:domainId` — root/admin
-- `PUT /api/v1/domain-configs/:domainId` — root only
-- `POST /api/v1/domain-configs/:domainId/enable` — root only
-- `POST /api/v1/domain-configs/:domainId/disable` — root only
+Management Bearer tokens are verified through the fixed main API
+`/v1/plugin/verify-token`. The service never reads the main-platform database.
 
-Domain create input contains the selected `configKey`, `schemaVersion`, and
-content JSON without `name`. Updates contain only `schemaVersion`, `revision`,
-and content, so they cannot rename the key. `displayName` is derived from the
-content and cannot be submitted independently. The public Unity response adds
-`name = configKey` at the compatibility boundary.
+Public lookup checks the full hostname followed by parent domains. The first
+existing disabled record returns `{}` and blocks parent fallback. A successful
+match returns the stored JSON object directly, with a strong ETag and
+`Cache-Control: public, no-cache, must-revalidate`.
 
-## Public Unity API
+## Safety
 
-```http
-GET /v1/white-label-configs?domain=d.dev.xrugc.com
-```
-
-The query accepts only a hostname or slug. Schemes, credentials, ports, paths,
-queries, and fragments are rejected. Input is lowercased, one trailing dot is
-removed, and IDNs are converted to ASCII.
-
-Lookup precedence mirrors the main frontend: `d.` candidates first, then
-`www.`, then the exact hostname and progressively broader parent domains, with
-duplicates removed. An explicitly configured `default` record is considered
-only when none of those records exists. If the first configured match is
-disabled or its snapshot is inactive, resolution returns `404` without falling
-through to a broader/default record.
-
-```json
-{
-  "version": 1,
-  "domain": {
-    "requestedDomain": "d.dev.xrugc.com",
-    "configKey": "dev.xrugc.com",
-    "isDomainFallback": true,
-    "revision": 2,
-    "schemaVersion": 1,
-    "config": {
-      "name": "dev.xrugc.com",
-      "description": "XR UGC Dev",
-      "is_active": true,
-      "fallback_domain": "default",
-      "default_config": {},
-      "configs": {}
-    }
-  }
-}
-```
-
-The response contains no organization data or database id. A strong ETag is
-derived from the complete response; `Cache-Control: public, no-cache,
-must-revalidate` permits storage but requires validation before reuse, and
-`If-None-Match` may return `304`. Disabling a record therefore remains an
-immediate operational kill switch for compliant clients and intermediaries.
-
-## Database compatibility
-
-`db/schema.sql` creates only `white_label_domain_config` for new installs. It
-contains no destructive statements. Organization/assignment tables left by an
-older deployment are therefore preserved as rollback data but are not used by
-the runtime.
+Config must be a JSON object. Size, depth, node count, array length, string
+length, and ASCII field-name limits apply. Credential-, token-, password-, key-,
+or database-connection-like fields are rejected recursively. There are no hard
+delete routes.
 
 ## Run
 
-1. Create a database and apply `db/schema.sql`.
-2. Configure MySQL and `MAIN_API_BASE_URL` in the environment.
-3. Optionally set `MAIN_FRONTEND_PUBLIC_BASE_URL` for the import catalog.
-4. Run `corepack pnpm --dir backend build` and then start `dist/server.js`.
-
-The MySQL integration test is opt-in and refuses database names that do not end
-in `_test`:
-
-```bash
-MYSQL_TEST_DATABASE=whitelabel_test \
-MYSQL_TEST_PORT=3338 \
-corepack pnpm --dir backend test:mysql
-```
+1. Apply `backend/db/schema.sql` to a dedicated database.
+2. Configure MySQL, `MAIN_API_BASE_URL`, and optional
+   `MAIN_FRONTEND_PUBLIC_BASE_URL`.
+3. Run `corepack pnpm --dir backend build`, then `dist/server.js`.
