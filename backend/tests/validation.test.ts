@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   configJsonSchema,
   createDomainConfigSchema,
+  domainConfigContentSchema,
   domainConfigCandidates,
   domainConfigKeySchema,
   requestedDomainSchema,
@@ -68,6 +69,7 @@ describe('main-frontend domain config validation', () => {
       'zh-CN': { title: 'XR UGC Dev' },
     },
   };
+  const { name: configKey, ...content } = snapshot;
 
   it.each([
     'DEV.XRUGC.COM',
@@ -101,17 +103,12 @@ describe('main-frontend domain config validation', () => {
     }).success).toBe(false);
   });
 
-  it('requires configKey to exactly match config.name', () => {
-    const parsed = createDomainConfigSchema.safeParse({
-      configKey: 'xrugc.com',
-      config: snapshot,
-    });
-    expect(parsed.success).toBe(false);
-    if (!parsed.success) {
-      expect(parsed.error.issues).toContainEqual(expect.objectContaining({
-        path: ['config', 'name'],
-      }));
-    }
+  it('stores configKey outside managed JSON and rejects duplicate name', () => {
+    expect(createDomainConfigSchema.safeParse({
+      configKey,
+      config: content,
+    }).success).toBe(true);
+    expect(domainConfigContentSchema.safeParse(snapshot).success).toBe(false);
   });
 
   it('applies recursive secret checks to the full domain snapshot', () => {
@@ -148,7 +145,7 @@ describe('main-frontend domain config validation', () => {
   it('defaults domain creates to schema v1 and requires explicit v1 on updates', () => {
     const create = createDomainConfigSchema.safeParse({
       configKey: snapshot.name,
-      config: snapshot,
+      config: content,
     });
     expect(create.success).toBe(true);
     if (create.success) {
@@ -157,25 +154,28 @@ describe('main-frontend domain config validation', () => {
     expect(createDomainConfigSchema.safeParse({
       configKey: snapshot.name,
       schemaVersion: 2,
-      config: snapshot,
+      config: content,
     }).success).toBe(false);
     expect(updateDomainConfigSchema.safeParse({
-      configKey: snapshot.name,
       revision: 1,
-      config: snapshot,
+      config: content,
     }).success).toBe(false);
     expect(updateDomainConfigSchema.safeParse({
-      configKey: snapshot.name,
       schemaVersion: 2,
       revision: 1,
-      config: snapshot,
+      config: content,
     }).success).toBe(false);
+    expect(updateDomainConfigSchema.safeParse({
+      schemaVersion: 1,
+      revision: 1,
+      config: content,
+    }).success).toBe(true);
     expect(updateDomainConfigSchema.safeParse({
       configKey: snapshot.name,
       schemaVersion: 1,
       revision: 1,
-      config: snapshot,
-    }).success).toBe(true);
+      config: content,
+    }).success).toBe(false);
   });
 });
 

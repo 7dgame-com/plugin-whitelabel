@@ -15,8 +15,10 @@ independent snapshot and public resolution never calls the main frontend.
 - `root` and `admin` may list and inspect domain records.
 - Only `root` may create, update, enable, disable, or use the import catalog.
 - New records are disabled and every mutation uses optimistic `revision` checks.
-- `configKey` must exactly equal `config.name`. Secret-bearing JSON fields are
-  rejected recursively and snapshots are size/depth constrained.
+- `configKey` is selected from the fixed main-frontend catalog, stored outside
+  JSON, and immutable after creation. A `name` field in editable JSON is
+  rejected. Secret-bearing fields are rejected recursively and snapshots are
+  size/depth constrained.
 - An enabled database record must also have `config.is_active === true` before
   it is publicly resolvable.
 - There are no delete routes.
@@ -31,9 +33,11 @@ independent snapshot and public resolution never calls the main frontend.
 - `POST /api/v1/domain-configs/:domainId/enable` — root only
 - `POST /api/v1/domain-configs/:domainId/disable` — root only
 
-Domain create input contains `configKey`, `schemaVersion`, and the complete
-snapshot. Updates additionally contain `revision`. `displayName` is derived
-from the snapshot and cannot be submitted independently.
+Domain create input contains the selected `configKey`, `schemaVersion`, and
+content JSON without `name`. Updates contain only `schemaVersion`, `revision`,
+and content, so they cannot rename the key. `displayName` is derived from the
+content and cannot be submitted independently. The public Unity response adds
+`name = configKey` at the compatibility boundary.
 
 ## Public Unity API
 

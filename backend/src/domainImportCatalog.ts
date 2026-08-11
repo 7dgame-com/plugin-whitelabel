@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import type { JsonObject, StaticDomainConfig } from './types';
+import type {
+  DomainConfigContent,
+  JsonObject,
+  StaticDomainConfig,
+} from './types';
 import {
   domainConfigKeySchema,
   hasLocalDomainConfigData,
@@ -78,7 +82,7 @@ export interface DomainImportCatalogItem {
   materializedFrom: string[];
   warnings: string[];
   reason?: string;
-  config?: StaticDomainConfig;
+  config?: DomainConfigContent;
 }
 
 export interface DomainImportCatalogResult {
@@ -124,6 +128,7 @@ function importableItem(
   materializedFrom: string[] = [],
   warnings: string[] = [],
 ): DomainImportCatalogItem {
+  const { name: _sourceConfigKey, ...content } = config;
   return {
     configKey: entry.configKey,
     description: entry.description,
@@ -131,7 +136,7 @@ function importableItem(
     importable: true,
     materializedFrom,
     warnings,
-    config,
+    config: content,
   };
 }
 

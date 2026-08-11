@@ -1,13 +1,13 @@
 import { backendApi } from './client'
 import type {
   CreateDomainConfigInput,
+  DomainConfigContent,
   DomainImportCatalog,
   DomainImportCatalogItem,
   DomainConfigRecord,
   JsonObject,
   ListQuery,
   PagedResult,
-  StaticDomainConfig,
   UpdateDomainConfigInput,
 } from '../domain/types'
 import { validateJsonObjectValue } from '../domain/jsonObject'
@@ -59,13 +59,14 @@ function timestamps(raw: UnknownRecord) {
 
 export function normalizeDomainConfig(value: unknown): DomainConfigRecord {
   const raw = asRecord(value)
-  const config = jsonObject(raw.config)
+  const rawConfig = jsonObject(raw.config)
   const configKey = stringValue(
-    config.name,
     raw.configKey,
     raw.domainConfigKey,
     raw.domain,
+    rawConfig.name,
   )
+  const { name: _legacyName, ...config } = rawConfig
   return {
     domainId: numberValue(raw.domainId),
     configKey,
@@ -78,7 +79,7 @@ export function normalizeDomainConfig(value: unknown): DomainConfigRecord {
     ),
     schemaVersion: numberValue(raw.schemaVersion),
     revision: numberValue(raw.revision),
-    config: config as StaticDomainConfig,
+    config: config as DomainConfigContent,
     enabled: booleanValue(raw.enabled),
     ...timestamps(raw),
   }
@@ -132,15 +133,16 @@ function hasOwn(record: UnknownRecord, key: string): boolean {
 function catalogDomainConfig(
   value: unknown,
   path: string,
-): StaticDomainConfig {
-  const result = validateJsonObjectValue<StaticDomainConfig>(value)
+  configKey: string,
+): DomainConfigContent {
+  const result = validateJsonObjectValue(value, configKey)
   if (!result.valid) {
     const details = result.issues
       .map((issue) => `${issue.path}: ${issue.message}`)
       .join('; ')
     throw catalogContractError(
       path,
-      `must be a valid StaticDomainConfig (${details})`,
+      `must be valid domain config content (${details})`,
     )
   }
   return result.value
@@ -172,7 +174,7 @@ export function normalizeDomainImportCatalogItem(
     : undefined
   const hasConfig = hasOwn(raw, 'config')
   const config = hasConfig
-    ? catalogDomainConfig(raw.config, `${path}.config`)
+    ? catalogDomainConfig(raw.config, `${path}.config`, configKey)
     : undefined
 
   if (!importable && (!reason || reason.trim() === '')) {
@@ -188,12 +190,6 @@ export function normalizeDomainImportCatalogItem(
     )
   }
   if (importable && config) {
-    if (config.name !== configKey) {
-      throw catalogContractError(
-        `${path}.config.name`,
-        'must exactly match configKey',
-      )
-    }
     if (config.description !== description) {
       throw catalogContractError(
         `${path}.config.description`,

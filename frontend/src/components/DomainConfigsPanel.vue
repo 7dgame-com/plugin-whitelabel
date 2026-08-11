@@ -148,7 +148,7 @@ import {
 } from '../api/whiteLabelManagement'
 import { useAuthSession } from '../composables/useAuthSession'
 import { domainDescriptionLabel } from '../domain/domainIdentity'
-import type { DomainConfigRecord, StaticDomainConfig } from '../domain/types'
+import type { DomainConfigContent, DomainConfigRecord } from '../domain/types'
 
 const { t } = useI18n()
 const { isRootUser } = useAuthSession()
@@ -213,14 +213,14 @@ async function openRecord(row: DomainConfigRecord): Promise<void> {
 
 async function save(value: {
   configKey: string
-  config: StaticDomainConfig
+  config: DomainConfigContent
 }): Promise<void> {
   if (!isRootUser.value || editorReadOnly.value) return
   saving.value = true
   try {
     if (editing.value) {
       await updateDomainConfig(editing.value.domainId, {
-        ...value,
+        config: value.config,
         revision: editing.value.revision,
         schemaVersion: 1,
       })

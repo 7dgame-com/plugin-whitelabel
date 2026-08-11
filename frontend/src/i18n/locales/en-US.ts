@@ -26,7 +26,7 @@ export default {
     jsonObjectRequired: 'The top-level value must be a JSON object',
     jsonSecurityInvalid: 'Security validation failed: {detail}',
     jsonSchemaInvalid: 'Schema validation failed: {detail}',
-    jsonDomainSchema: 'Domain schema · Unity StaticDomainConfig',
+    jsonDomainSchema: 'White-label content schema · key stored separately',
     saveSuccess: 'Configuration saved',
     saveFailed: 'Save failed; check the content or revision conflict',
     statusUpdated: 'Status updated',
@@ -45,17 +45,20 @@ export default {
     scopeLabel: 'Domain white-label configuration',
     title: 'Domain configurations',
     description:
-      'Each record is a self-contained snapshot aligned with the main frontend domains/*.json. config.name is the match key and need not equal the complete request hostname.',
+      'The domain configuration key is stored separately. JSON contains editable white-label content only; the backend composes name for Unity responses.',
     rootScope:
-      'Root can create, edit, toggle, and perform one-time imports from the main frontend catalog.',
+      'Root selects a key from the main-frontend catalog to create a record, then edits content and toggles its status.',
     adminScope:
       'Admins can view the domain list and complete JSON, but cannot create, edit, toggle, or import.',
     defaultMatch: 'Default when no more specific key matches',
     subdomainMatch: 'May also match supported subdomain candidates of {domain}',
     descriptionField: 'Description',
     configKey: 'Domain configuration key',
+    configKeyImmutable:
+      'The key is immutable after creation. Add new keys to the main-frontend domain catalog first.',
     unityJson: 'Unity white-label JSON',
     json: 'Complete Unity white-label JSON',
+    jsonContent: 'White-label JSON content (without name)',
     add: 'Add domain configuration',
     createTitle: 'Add domain white-label configuration',
     editTitle: 'Edit domain white-label configuration',
@@ -63,26 +66,23 @@ export default {
     searchPlaceholder: 'Search description or domain configuration key',
     loadFailed: 'Failed to load domain configurations',
     editBoundary:
-      'Edit one complete StaticDomainConfig. config.name is the domain match key; saving creates an independent plugin snapshot.',
+      'The configuration key is stored separately and immutable. Edit content only; JSON must not contain name.',
     readOnlyBoundary:
       'This is a read-only view. Only root can edit, import, or toggle domain configurations.',
-    importTitle: 'Select and import main-frontend JSON',
+    importTitle: 'Select a main-frontend domain configuration key',
     importOneTimeHint:
-      'This is a one-time copy: importing fully replaces the JSON below, and saving does not keep it synchronized with the main frontend.',
+      'Selection automatically loads its JSON content. The selection is the only key and must not be repeated in JSON.',
     importSelectPlaceholder: 'Search main-frontend key or description',
     importNoData: 'No main-frontend domain configuration is available',
-    importAction: 'Import into editor',
     importMissingConfig: 'The API did not return copyable JSON',
     importLoadFailed: 'Failed to load the main-frontend domain catalog',
-    importManualFallback: 'You can still edit and save JSON manually below.',
+    importCreateUnavailable:
+      'Keys can only come from the main-frontend catalog; creation is unavailable until the catalog recovers.',
+    importSelectionRequired:
+      'Select an importable domain configuration key from the main-frontend catalog first.',
     importSource: 'Source: {source}',
     importMaterialized: 'Materialized during import: {values}',
     importWarnings: 'Import notes:',
-    importConfirmTitle: 'Fully replace the current JSON?',
-    importConfirmMessage:
-      'The editor already has content. Importing does not merge fields; it fully replaces the current JSON. Continue?',
-    importConfirmButton: 'Replace and import',
-    importSuccess: 'Imported in full; review the JSON before saving',
     disableBeforeInactive:
       'This domain configuration is enabled. Disable it in the list before setting JSON is_active to false.',
   },

@@ -23,10 +23,12 @@ import type {
   DomainConfigInput,
   JsonObject,
   SessionVerifier,
+  StaticDomainConfig,
   VersionedMutationResult,
   WhiteLabelRepository,
 } from './types';
 import {
+  assertSelfContainedDomainConfigContent,
   createDomainConfigSchema,
   domainConfigCandidates,
   listQuerySchema,
@@ -48,7 +50,7 @@ interface ManagementContext {
   isRoot: boolean;
 }
 
-type PublicWhiteLabelResponse = DomainConfig['config'] | JsonObject;
+type PublicWhiteLabelResponse = StaticDomainConfig | JsonObject;
 
 type AsyncRequestHandler = (
   request: Request,
@@ -161,7 +163,35 @@ function createManagementAuth(sessionVerifier: SessionVerifier): RequestHandler 
   });
 }
 
-function createDomainRouter(repository: WhiteLabelRepository): express.Router {
+async function requireCatalogConfigKey(
+  catalog: DomainImportCatalog | undefined,
+  configKey: string,
+): Promise<void> {
+  if (!catalog) {
+    throw domainCatalogUnavailable();
+  }
+  let items;
+  try {
+    ({ items } = await catalog.list());
+  } catch {
+    throw domainCatalogUnavailable();
+  }
+  const selected = items.find((item) => item.configKey === configKey);
+  if (!selected?.importable || !selected.config) {
+    throw unprocessable(
+      'Select an importable configuration key from the main frontend catalog',
+      [{
+        path: 'configKey',
+        message: 'configKey must come from an importable main frontend catalog entry',
+      }],
+    );
+  }
+}
+
+function createDomainRouter(
+  repository: WhiteLabelRepository,
+  catalog: DomainImportCatalog | undefined,
+): express.Router {
   const router = express.Router();
 
   router.get('/', asyncHandler(async (request, response) => {
@@ -173,6 +203,7 @@ function createDomainRouter(repository: WhiteLabelRepository): express.Router {
   router.post('/', asyncHandler(async (request, response) => {
     const context = requireRoot(response);
     const body = parseInput(createDomainConfigSchema, request.body);
+    await requireCatalogConfigKey(catalog, body.configKey);
     const input: DomainConfigInput = {
       configKey: body.configKey,
       schemaVersion: body.schemaVersion,
@@ -198,9 +229,10 @@ function createDomainRouter(repository: WhiteLabelRepository): express.Router {
     const context = requireRoot(response);
     const domainId = parseInput(positiveIdSchema, request.params.domainId);
     const body = parseInput(updateDomainConfigSchema, request.body);
-    if (!body.config.is_active) {
-      const current = await repository.findDomainConfig(domainId);
-      if (current?.revision === body.revision && current.enabled) {
+    const current = await repository.findDomainConfig(domainId);
+    if (current?.revision === body.revision) {
+      assertSelfContainedDomainConfigContent(current.configKey, body.config);
+      if (!body.config.is_active && current.enabled) {
         throw unprocessable(
           'Disable the domain configuration before saving a snapshot with config.is_active=false',
           [{
@@ -288,7 +320,10 @@ function createPublicResolverRouter(repository: WhiteLabelRepository): express.R
       sendPublicConfig(request, response, {});
       return;
     }
-    sendPublicConfig(request, response, record.config);
+    sendPublicConfig(request, response, {
+      ...record.config,
+      name: record.configKey,
+    });
   }));
 
   return router;
@@ -345,7 +380,7 @@ export function createApp(dependencies: AppDependencies): express.Express {
   app.use(
     '/api/v1/domain-configs',
     managementAuth,
-    createDomainRouter(dependencies.repository),
+    createDomainRouter(dependencies.repository, dependencies.domainImportCatalog),
   );
   app.use(
     '/v1/white-label-configs',
