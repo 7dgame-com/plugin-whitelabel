@@ -1,20 +1,12 @@
 {
-  "name": "dev.xrugc.com",
-  "description": "XR UGC Dev",
-  "is_active": true,
-  "fallback_domain": "default",
-  "default_config": {
-    "homepage": "https://dev.xrugc.com/",
-    "icon": "https://dev.xrugc.com/logo.webp"
+  "name": "主站",
+  "logoUrl": "https://cdn.example.com/brand/logo.webp",
+  "theme": {
+    "primaryColor": "#409eff"
   },
-  "configs": {
+  "locales": {
     "zh-CN": {
-      "title": "XR UGC Dev",
-      "description": "XR UGC 开发环境"
-    },
-    "en-US": {
-      "title": "XR UGC Dev",
-      "description": "XR UGC development environment"
+      "title": "欢迎"
     }
   }
 }

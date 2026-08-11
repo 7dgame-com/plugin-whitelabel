@@ -18,15 +18,15 @@ export default {
     revision: 'Revision',
     status: 'Status',
     jsonKeyCount: '{count} top-level keys',
-    jsonInvalid: 'Configuration must be a valid JSON object matching the schema',
+    jsonInvalid: 'Configuration must be a valid and safe JSON object',
     jsonFormat: 'Format',
     jsonCompact: 'Compact',
-    jsonValid: 'JSON and schema are valid',
+    jsonValid: 'JSON is valid',
     jsonSyntaxInvalid: 'Invalid JSON syntax',
     jsonObjectRequired: 'The top-level value must be a JSON object',
     jsonSecurityInvalid: 'Security validation failed: {detail}',
-    jsonSchemaInvalid: 'Schema validation failed: {detail}',
-    jsonDomainSchema: 'White-label content schema · key stored separately',
+    jsonSchemaInvalid: 'JSON validation failed: {detail}',
+    jsonDomainSchema: 'Independent white-label JSON · key selected separately',
     saveSuccess: 'Configuration saved',
     saveFailed: 'Save failed; check the content or revision conflict',
     statusUpdated: 'Status updated',
@@ -45,7 +45,7 @@ export default {
     scopeLabel: 'Domain white-label configuration',
     title: 'Domain configurations',
     description:
-      'The domain configuration key is stored separately. JSON contains editable white-label content only; the backend composes name for Unity responses.',
+      'Select a key from the read-only main-frontend catalog, then author independent white-label JSON that is returned unchanged.',
     rootScope:
       'Root selects a key from the main-frontend catalog to create a record, then edits content and toggles its status.',
     adminScope:
@@ -58,7 +58,7 @@ export default {
       'The key is immutable after creation. Add new keys to the main-frontend domain catalog first.',
     unityJson: 'Unity white-label JSON',
     json: 'Complete Unity white-label JSON',
-    jsonContent: 'White-label JSON content (without name)',
+    jsonContent: 'Independent white-label JSON content',
     add: 'Add domain configuration',
     createTitle: 'Add domain white-label configuration',
     editTitle: 'Edit domain white-label configuration',
@@ -66,25 +66,21 @@ export default {
     searchPlaceholder: 'Search description or domain configuration key',
     loadFailed: 'Failed to load domain configurations',
     editBoundary:
-      'The configuration key is stored separately and immutable. Edit content only; JSON must not contain name.',
+      'The key is stored separately and immutable. This JSON belongs to the plugin; name may be used as ordinary brand content.',
     readOnlyBoundary:
       'This is a read-only view. Only root can edit, import, or toggle domain configurations.',
-    importTitle: 'Select a main-frontend domain configuration key',
+    importTitle: 'Select a key from the read-only main-frontend catalog',
     importOneTimeHint:
-      'Selection automatically loads its JSON content. The selection is the only key and must not be repeated in JSON.',
+      'Only key and description are read. Main-frontend JSON is never loaded, copied, or modified; enter independent JSON below.',
     importSelectPlaceholder: 'Search main-frontend key or description',
-    importNoData: 'No main-frontend domain configuration is available',
+    importNoData: 'No main-frontend configuration key is available',
     importMissingConfig: 'The API did not return copyable JSON',
     importLoadFailed: 'Failed to load the main-frontend domain catalog',
     importCreateUnavailable:
       'Keys can only come from the main-frontend catalog; creation is unavailable until the catalog recovers.',
     importSelectionRequired:
-      'Select an importable domain configuration key from the main-frontend catalog first.',
+      'Select an active key from the read-only main-frontend catalog first.',
     importSource: 'Source: {source}',
-    importMaterialized: 'Materialized during import: {values}',
-    importWarnings: 'Import notes:',
-    disableBeforeInactive:
-      'This domain configuration is enabled. Disable it in the list before setting JSON is_active to false.',
   },
   auth: {
     deniedTitle: 'Access denied',

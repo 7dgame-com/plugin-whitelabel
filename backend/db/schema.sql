@@ -3,10 +3,9 @@ CREATE TABLE IF NOT EXISTS `white_label_domain_config` (
   -- Sole authoritative identity selected from the main-frontend catalog and
   -- exposed by the API as `configKey`.
   `domain` VARCHAR(253) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-  -- Read-only projection derived from config_json.description, falling back to
-  -- domain/configKey. Clients do not submit this value.
+  -- Main-frontend catalog description captured when the key is created.
   `display_name` VARCHAR(191) NOT NULL,
-  -- Editable white-label content only. Identity/name is never stored here.
+  -- Independent public white-label JSON. `name`, when present, is brand data.
   `config_json` JSON NOT NULL,
   `schema_version` INT UNSIGNED NOT NULL DEFAULT 1,
   `revision` BIGINT UNSIGNED NOT NULL DEFAULT 1,

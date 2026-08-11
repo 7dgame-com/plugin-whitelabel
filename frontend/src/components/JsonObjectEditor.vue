@@ -71,7 +71,6 @@ const props = defineProps<{
   modelValue: string
   readOnly?: boolean
   ariaLabel?: string
-  configKey?: string
 }>()
 
 const emit = defineEmits<{
@@ -86,7 +85,7 @@ let editorView: EditorView | null = null
 let syncingFromProps = false
 
 const validation = computed(() =>
-  validateJsonObjectText(props.modelValue, props.configKey),
+  validateJsonObjectText(props.modelValue),
 )
 
 const canReformat = computed(
@@ -198,7 +197,7 @@ function jsonLint(view: EditorView): Diagnostic[] {
   if (syntaxDiagnostics.length > 0) return syntaxDiagnostics
 
   const text = view.state.doc.toString()
-  const result = validateJsonObjectText(text, props.configKey)
+  const result = validateJsonObjectText(text)
   if (result.valid) return []
 
   return result.issues.map((issue) => ({

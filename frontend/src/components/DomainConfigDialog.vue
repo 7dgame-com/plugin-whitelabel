@@ -49,7 +49,7 @@
             :key="item.configKey"
             :value="item.configKey"
             :label="`${item.configKey} · ${item.description}`"
-            :disabled="!item.importable || !item.config"
+            :disabled="!item.selectable"
           >
             <div class="domain-import-option">
               <div class="domain-import-option__identity">
@@ -67,11 +67,8 @@
                       : t('common.disabled')
                   }}
                 </el-tag>
-                <small v-if="!item.importable || !item.config">
-                  {{
-                    item.reason ||
-                    (!item.config ? t('domain.importMissingConfig') : '')
-                  }}
+                <small v-if="!item.selectable">
+                  {{ item.reason }}
                 </small>
               </div>
             </div>
@@ -97,24 +94,6 @@
         <span v-if="catalogSource">
           {{ t('domain.importSource', { source: catalogSource }) }}
         </span>
-        <span v-if="selectedCatalogItem.materializedFrom.length">
-          {{
-            t('domain.importMaterialized', {
-              values: selectedCatalogItem.materializedFrom.join(', '),
-            })
-          }}
-        </span>
-        <div v-if="selectedCatalogItem.warnings.length">
-          <strong>{{ t('domain.importWarnings') }}</strong>
-          <ul>
-            <li
-              v-for="warning in selectedCatalogItem.warnings"
-              :key="warning"
-            >
-              {{ warning }}
-            </li>
-          </ul>
-        </div>
       </div>
     </section>
 
@@ -130,7 +109,6 @@
           :key="`${activeConfigKey}:${readOnly || (!record && !selectedCatalogItem)}`"
           v-model="form.json"
           :read-only="readOnly || (!record && !selectedCatalogItem)"
-          :config-key="activeConfigKey"
           :aria-label="t('domain.jsonContent')"
         />
       </el-form-item>
@@ -171,8 +149,8 @@ import { useI18n } from 'vue-i18n'
 import JsonObjectEditor from './JsonObjectEditor.vue'
 import type {
   DomainConfigRecord,
-  DomainConfigContent,
   DomainImportCatalogItem,
+  JsonObject,
 } from '../domain/types'
 import { validateJsonObjectText } from '../domain/jsonObject'
 import { getDomainImportCatalog } from '../api/whiteLabelManagement'
@@ -186,7 +164,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:visible': [visible: boolean]
-  submit: [value: { configKey: string; config: DomainConfigContent }]
+  submit: [value: { configKey: string; config: JsonObject }]
 }>()
 
 const { t } = useI18n()
@@ -207,9 +185,7 @@ const selectedCatalogItem = computed<DomainImportCatalogItem | null>(
     ) ?? null,
 )
 const canCreateSelected = computed(
-  () =>
-    Boolean(selectedCatalogItem.value?.importable) &&
-    Boolean(selectedCatalogItem.value?.config),
+  () => Boolean(selectedCatalogItem.value?.selectable),
 )
 const activeConfigKey = computed(
   () => props.record?.configKey ?? selectedCatalogKey.value,
@@ -225,14 +201,8 @@ const rules: FormRules = {
   ],
 }
 
-function emptyDomainConfig(): DomainConfigContent {
-  return {
-    description: '',
-    is_active: true,
-    fallback_domain: null,
-    default_config: {},
-    configs: {},
-  }
+function emptyDomainConfig(): JsonObject {
+  return {}
 }
 
 function reset(): void {
@@ -273,13 +243,12 @@ function invalidateImportCatalogRequest(): void {
 
 function selectCatalogConfig(): void {
   const item = selectedCatalogItem.value
-  if (!item?.importable || !item.config) return
-  form.json = JSON.stringify(item.config, null, 2)
+  if (!item?.selectable) return
   formRef.value?.clearValidate('json')
 }
 
-function parseJson(): DomainConfigContent | null {
-  const parsed = validateJsonObjectText(form.json, activeConfigKey.value)
+function parseJson(): JsonObject | null {
+  const parsed = validateJsonObjectText(form.json)
   if (!parsed.valid) {
     ElMessage.error(t('common.jsonInvalid'))
     return null
@@ -298,11 +267,6 @@ async function submit(): Promise<void> {
   if (!valid) return
   const config = parseJson()
   if (!config) return
-  if (props.record?.enabled && !config.is_active) {
-    ElMessage.error(t('domain.disableBeforeInactive'))
-    return
-  }
-
   emit('submit', {
     configKey: activeConfigKey.value,
     config,

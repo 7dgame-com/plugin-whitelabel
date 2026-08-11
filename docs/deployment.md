@@ -16,7 +16,7 @@
 | frontend | `APP_BACKEND_1_URL` | 同一 stack 内的插件后端 origin |
 | backend | `MAIN_API_BASE_URL` | 主后端固定 base URL |
 | backend | `MAIN_API_TIMEOUT_MS` | 管理鉴权超时 |
-| backend | `MAIN_FRONTEND_PUBLIC_BASE_URL` | 可选；root 导入使用的主前端纯 origin |
+| backend | `MAIN_FRONTEND_PUBLIC_BASE_URL` | 可选；root 读取配置键摘要的主前端纯 origin |
 | backend | `DOMAIN_CATALOG_TIMEOUT_MS` | 可选；manifest 超时 |
 | backend | `DB_HOST` 等 | 插件 MySQL |
 
@@ -86,14 +86,13 @@ port.7dgame.com
 
 ## 5. 主前端 manifest 边界
 
-插件公开 JSON 与主前端 `web/public/config/domains/{configKey}.json` 使用同一数据结构
-和配置键语义；插件数据库则把 `configKey` 与不含 `name` 的内容分开保存：
+主前端 manifest 只提供配置键命名空间：
 
-- 主前端构建发布 `/config/domains/manifest.json`；
-- root 可在插件编辑器中选择一项；该选择同时确定键并一次性复制内容；
-- 插件不写主前端仓库，也不在运行时读取 manifest；
-- manifest 不可用不会影响已有配置解析；
-- 若新键也要影响主前端本身，仍需在主前端仓库单独增加 JSON 并发布。
+- 插件只读取 `configKey`、`description`、`isActive` 摘要；
+- root 选择一项只会确定不可变键并解锁编辑器；
+- 插件不读取、复制、合并或同步主前端 JSON 内容；
+- root 在编辑器中自行填写插件独立 JSON，保存后原样提供给 Unity；
+- manifest 不可用不会影响已有配置的编辑、启停或公开解析。
 
 ## 6. 数据库初始化与旧数据
 
