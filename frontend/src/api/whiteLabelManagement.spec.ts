@@ -21,9 +21,10 @@ import {
   updateDomainConfig,
 } from './whiteLabelManagement'
 
+const CONFIG_KEY = 'xrugc-family'
+
 function catalogConfig() {
   return {
-    name: 'xrugc-family',
     description: 'XR UGC agent family',
     is_active: true,
     fallback_domain: null,
@@ -72,6 +73,7 @@ describe('domain-only management API contract', () => {
           items: [
             {
               domainId: 8,
+              configKey: CONFIG_KEY,
               schemaVersion: 1,
               revision: 3,
               enabled: true,
@@ -102,7 +104,7 @@ describe('domain-only management API contract', () => {
     })
   })
 
-  it('treats config.name and config.description as authoritative identity', () => {
+  it('treats the external configKey as authoritative and strips legacy JSON name', () => {
     expect(
       normalizeDomainConfig({
         domainId: 8,
@@ -119,8 +121,9 @@ describe('domain-only management API contract', () => {
       }),
     ).toMatchObject({
       domainId: 8,
-      configKey: 'dev.xrugc.com',
+      configKey: 'legacy.example.com',
       description: 'XR UGC Dev',
+      config: expect.not.objectContaining({ name: expect.anything() }),
     })
   })
 
@@ -141,12 +144,11 @@ describe('domain-only management API contract', () => {
     vi.mocked(backendApi.put).mockResolvedValue({ data: { data: {} } })
 
     await createDomainConfig({
-      configKey: config.name,
+      configKey: CONFIG_KEY,
       schemaVersion: 1,
       config,
     })
     await updateDomainConfig(8, {
-      configKey: config.name,
       schemaVersion: 1,
       revision: 5,
       config,
@@ -159,7 +161,6 @@ describe('domain-only management API contract', () => {
       config,
     })
     expect(backendApi.put).toHaveBeenCalledWith('/domain-configs/8', {
-      configKey: 'xrugc-family',
       schemaVersion: 1,
       revision: 5,
       config,
@@ -241,14 +242,13 @@ describe('domain-only management API contract', () => {
       'schema-invalid config',
       catalogPayload({
         config: {
-          name: 'xrugc-family',
           description: 'XR UGC agent family',
           is_active: true,
           fallback_domain: null,
           default_config: {},
         },
       }),
-      /StaticDomainConfig/,
+      /domain config content/,
     ],
     [
       'unsafe config',
@@ -258,14 +258,14 @@ describe('domain-only management API contract', () => {
           default_config: { apiToken: 'must not be imported' },
         },
       }),
-      /StaticDomainConfig/,
+      /domain config content/,
     ],
     [
-      'configKey mismatch',
+      'duplicate JSON identity',
       catalogPayload({
-        config: { ...catalogConfig(), name: 'different-family' },
+        config: { ...catalogConfig(), name: CONFIG_KEY },
       }),
-      /config\.name/,
+      /managed outside JSON/,
     ],
     [
       'description mismatch',

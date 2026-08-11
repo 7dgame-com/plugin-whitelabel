@@ -7,7 +7,6 @@ import {
 } from './jsonObject'
 
 const validDomainConfig = {
-  name: 'dev.xrugc.com',
   description: 'XR UGC Dev',
   is_active: true,
   fallback_domain: 'default',
@@ -56,7 +55,7 @@ describe('domain JSON schema', () => {
     })
   })
 
-  it('accepts the main-frontend StaticDomainConfig shape and future fields', () => {
+  it('accepts editable content with future fields and keeps identity outside JSON', () => {
     expect(
       validateJsonObjectText(
         JSON.stringify({ ...validDomainConfig, future_option: true }),
@@ -64,9 +63,16 @@ describe('domain JSON schema', () => {
     ).toMatchObject({
       valid: true,
       value: {
-        name: 'dev.xrugc.com',
         description: 'XR UGC Dev',
       },
+    })
+    expect(
+      validateJsonObjectText(
+        JSON.stringify({ ...validDomainConfig, name: 'dev.xrugc.com' }),
+      ),
+    ).toMatchObject({
+      valid: false,
+      issues: [expect.objectContaining({ path: '/name' })],
     })
   })
 
@@ -81,6 +87,9 @@ describe('domain JSON schema', () => {
       valid: true,
     })
     expect(validatePayload(nodeBoundaryConfig(987))).toMatchObject({
+      valid: true,
+    })
+    expect(validatePayload(nodeBoundaryConfig(988))).toMatchObject({
       valid: false,
       issues: [expect.objectContaining({ code: 'security' })],
     })
@@ -179,7 +188,7 @@ describe('domain JSON schema', () => {
     })
   })
 
-  it('requires all six StaticDomainConfig fields', () => {
+  it('requires all five editable content fields', () => {
     const { configs: _configs, ...incomplete } = validDomainConfig
     const result = validateJsonObjectText(JSON.stringify(incomplete))
 
@@ -203,52 +212,32 @@ describe('domain JSON schema', () => {
     expect(isValidDomainConfigKey(value)).toBe(valid)
   })
 
-  it('rejects an unsafe name and invalid language config values', () => {
-    const result = validateJsonObjectText(
+  it('rejects identity inside JSON and invalid language config values', () => {
+    const identityResult = validateJsonObjectText(
       JSON.stringify({
         ...validDomainConfig,
-        name: 'https://dev.xrugc.com/path',
-        configs: { 'zh-CN': 'not-an-object' },
+        name: 'dev.xrugc.com',
       }),
     )
-
-    expect(result.valid).toBe(false)
-    if (!result.valid) {
-      expect(result.issues.map((issue) => issue.path)).toEqual(
-        expect.arrayContaining(['/name', '/configs/zh-CN']),
-      )
-    }
+    expect(identityResult).toMatchObject({
+      valid: false,
+      issues: [expect.objectContaining({ path: '/name' })],
+    })
+    const contentResult = validateJsonObjectText(JSON.stringify({
+      ...validDomainConfig,
+      configs: { 'zh-CN': 'not-an-object' },
+    }))
+    expect(contentResult).toMatchObject({
+      valid: false,
+      issues: [expect.objectContaining({ path: '/configs/zh-CN' })],
+    })
   })
 
-  it('requires a description only when the config key exceeds 191 characters', () => {
-    const key191 = [
-      'a'.repeat(63),
-      'b'.repeat(63),
-      'c'.repeat(63),
-    ].join('.')
-    const key193 = `${key191}.d`
-
-    expect(
-      validateJsonObjectText(
-        JSON.stringify({
-          ...validDomainConfig,
-          name: key191,
-          description: '   ',
-        }),
-      ),
-    ).toMatchObject({ valid: true })
-    expect(
-      validateJsonObjectText(
-        JSON.stringify({
-          ...validDomainConfig,
-          name: key193,
-          description: '   ',
-        }),
-      ),
-    ).toMatchObject({
-      valid: false,
-      issues: [expect.objectContaining({ path: '/description' })],
-    })
+  it('allows an empty description because configKey is stored separately', () => {
+    expect(validateJsonObjectText(JSON.stringify({
+      ...validDomainConfig,
+      description: '',
+    }))).toMatchObject({ valid: true })
   })
 
   it('requires Unity snapshots to contain local data for external fallback', () => {

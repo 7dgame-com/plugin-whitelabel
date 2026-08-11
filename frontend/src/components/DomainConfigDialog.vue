@@ -24,7 +24,7 @@
     />
 
     <section
-      v-if="!readOnly"
+      v-if="!readOnly && !record"
       class="domain-import"
       :aria-label="t('domain.importTitle')"
     >
@@ -37,12 +37,12 @@
         <el-select
           v-model="selectedCatalogKey"
           filterable
-          clearable
           :loading="catalogLoading"
           :placeholder="t('domain.importSelectPlaceholder')"
           :no-data-text="t('domain.importNoData')"
           data-testid="domain-import-select"
           class="domain-import__select"
+          @change="selectCatalogConfig"
         >
           <el-option
             v-for="item in catalogItems"
@@ -77,22 +77,12 @@
             </div>
           </el-option>
         </el-select>
-
-        <el-button
-          type="primary"
-          plain
-          :disabled="!canImportSelected"
-          data-testid="domain-import-button"
-          @click="importSelectedConfig"
-        >
-          {{ t('domain.importAction') }}
-        </el-button>
       </div>
 
       <el-alert
         v-if="catalogLoadFailed"
         :title="t('domain.importLoadFailed')"
-        :description="t('domain.importManualFallback')"
+        :description="t('domain.importCreateUnavailable')"
         type="warning"
         :closable="false"
         show-icon
@@ -128,12 +118,20 @@
       </div>
     </section>
 
+    <div v-if="record" class="domain-key-summary">
+      <span>{{ t('domain.configKey') }}</span>
+      <code>{{ record.configKey }}</code>
+      <small>{{ t('domain.configKeyImmutable') }}</small>
+    </div>
+
     <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
-      <el-form-item :label="t('domain.json')" prop="json">
+      <el-form-item :label="t('domain.jsonContent')" prop="json">
         <JsonObjectEditor
+          :key="`${activeConfigKey}:${readOnly || (!record && !selectedCatalogItem)}`"
           v-model="form.json"
-          :read-only="readOnly"
-          :aria-label="t('domain.json')"
+          :read-only="readOnly || (!record && !selectedCatalogItem)"
+          :config-key="activeConfigKey"
+          :aria-label="t('domain.jsonContent')"
         />
       </el-form-item>
     </el-form>
@@ -146,6 +144,7 @@
         v-if="!readOnly"
         type="primary"
         :loading="saving"
+        :disabled="!record && !canCreateSelected"
         @click="submit"
       >
         {{ t('common.save') }}
@@ -165,7 +164,6 @@ import {
 } from 'vue'
 import {
   ElMessage,
-  ElMessageBox,
   type FormInstance,
   type FormRules,
 } from 'element-plus'
@@ -173,8 +171,8 @@ import { useI18n } from 'vue-i18n'
 import JsonObjectEditor from './JsonObjectEditor.vue'
 import type {
   DomainConfigRecord,
+  DomainConfigContent,
   DomainImportCatalogItem,
-  StaticDomainConfig,
 } from '../domain/types'
 import { validateJsonObjectText } from '../domain/jsonObject'
 import { getDomainImportCatalog } from '../api/whiteLabelManagement'
@@ -188,7 +186,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:visible': [visible: boolean]
-  submit: [value: { configKey: string; config: StaticDomainConfig }]
+  submit: [value: { configKey: string; config: DomainConfigContent }]
 }>()
 
 const { t } = useI18n()
@@ -208,10 +206,13 @@ const selectedCatalogItem = computed<DomainImportCatalogItem | null>(
       (item) => item.configKey === selectedCatalogKey.value,
     ) ?? null,
 )
-const canImportSelected = computed(
+const canCreateSelected = computed(
   () =>
     Boolean(selectedCatalogItem.value?.importable) &&
     Boolean(selectedCatalogItem.value?.config),
+)
+const activeConfigKey = computed(
+  () => props.record?.configKey ?? selectedCatalogKey.value,
 )
 
 const rules: FormRules = {
@@ -224,9 +225,8 @@ const rules: FormRules = {
   ],
 }
 
-function emptyDomainConfig(): StaticDomainConfig {
+function emptyDomainConfig(): DomainConfigContent {
   return {
-    name: '',
     description: '',
     is_active: true,
     fallback_domain: null,
@@ -271,33 +271,15 @@ function invalidateImportCatalogRequest(): void {
   catalogLoading.value = false
 }
 
-async function importSelectedConfig(): Promise<void> {
+function selectCatalogConfig(): void {
   const item = selectedCatalogItem.value
   if (!item?.importable || !item.config) return
-
-  if (form.json.trim()) {
-    try {
-      await ElMessageBox.confirm(
-        t('domain.importConfirmMessage'),
-        t('domain.importConfirmTitle'),
-        {
-          type: 'warning',
-          confirmButtonText: t('domain.importConfirmButton'),
-          cancelButtonText: t('common.cancel'),
-        },
-      )
-    } catch {
-      return
-    }
-  }
-
   form.json = JSON.stringify(item.config, null, 2)
   formRef.value?.clearValidate('json')
-  ElMessage.success(t('domain.importSuccess'))
 }
 
-function parseJson(): StaticDomainConfig | null {
-  const parsed = validateJsonObjectText(form.json)
+function parseJson(): DomainConfigContent | null {
+  const parsed = validateJsonObjectText(form.json, activeConfigKey.value)
   if (!parsed.valid) {
     ElMessage.error(t('common.jsonInvalid'))
     return null
@@ -308,6 +290,10 @@ function parseJson(): StaticDomainConfig | null {
 async function submit(): Promise<void> {
   if (props.readOnly) return
   if (!formRef.value) return
+  if (!props.record && !canCreateSelected.value) {
+    ElMessage.error(t('domain.importSelectionRequired'))
+    return
+  }
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
   const config = parseJson()
@@ -318,7 +304,7 @@ async function submit(): Promise<void> {
   }
 
   emit('submit', {
-    configKey: config.name,
+    configKey: activeConfigKey.value,
     config,
   })
 }
@@ -328,7 +314,7 @@ watch(
   ([visible]) => {
     if (visible) {
       reset()
-      if (props.readOnly) {
+      if (props.readOnly || props.record) {
         invalidateImportCatalogRequest()
         catalogItems.value = []
         catalogSource.value = ''
@@ -355,6 +341,26 @@ onBeforeUnmount(invalidateImportCatalogRequest)
   border: 1px solid var(--el-border-color-light);
   border-radius: 10px;
   background: var(--el-fill-color-lighter);
+}
+
+.domain-key-summary {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 10px;
+  background: var(--el-fill-color-lighter);
+}
+
+.domain-key-summary span,
+.domain-key-summary small {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.domain-key-summary code {
+  font-weight: 600;
 }
 
 .domain-import__heading {
@@ -415,8 +421,7 @@ onBeforeUnmount(invalidateImportCatalogRequest)
     flex-direction: column;
   }
 
-  .domain-import__select,
-  .domain-import__controls :deep(.el-button) {
+  .domain-import__select {
     width: 100%;
   }
 }

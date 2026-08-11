@@ -5,8 +5,8 @@ import type { DomainImportCatalog } from '../src/domainImportCatalog';
 import type {
   AuthenticatedSession,
   DomainConfig,
+  DomainConfigContent,
   SessionVerifier,
-  StaticDomainConfig,
   WhiteLabelRepository,
 } from '../src/types';
 
@@ -20,11 +20,10 @@ const audit = {
   statusChangedAt: '2026-01-02T00:00:00.000Z',
 };
 
-function domainSnapshot(
-  overrides: Partial<StaticDomainConfig> = {},
-): StaticDomainConfig {
+function domainContent(
+  overrides: Partial<DomainConfigContent> = {},
+): DomainConfigContent {
   return {
-    name: 'dev.xrugc.com',
     description: 'XR UGC Dev',
     is_active: true,
     fallback_domain: 'xrugc.com',
@@ -41,10 +40,37 @@ function domain(overrides: Partial<DomainConfig> = {}): DomainConfig {
     displayName: 'XR UGC Dev',
     schemaVersion: 1,
     revision: 3,
-    config: domainSnapshot(),
+    config: domainContent(),
     enabled: true,
     ...audit,
     ...overrides,
+  };
+}
+
+function publicSnapshot(
+  configKey = 'dev.xrugc.com',
+  overrides: Partial<DomainConfigContent> = {},
+) {
+  return { name: configKey, ...domainContent(overrides) };
+}
+
+function catalogFor(
+  configKey = 'dev.xrugc.com',
+  config: DomainConfigContent = domainContent(),
+): DomainImportCatalog {
+  return {
+    list: vi.fn().mockResolvedValue({
+      source: 'fixed',
+      items: [{
+        configKey,
+        description: config.description,
+        isActive: config.is_active,
+        importable: true,
+        materializedFrom: [],
+        warnings: [],
+        config,
+      }],
+    }),
   };
 }
 
@@ -103,7 +129,7 @@ describe('domain-only white-label backend', () => {
       .query({ domain: 'dev.xrugc.com' });
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual(domainSnapshot());
+    expect(response.body).toEqual(publicSnapshot());
     expect(response.body).not.toHaveProperty('organization');
     expect(response.body).not.toHaveProperty('domainId');
     expect(response.headers['cache-control']).toBe(
@@ -118,7 +144,7 @@ describe('domain-only white-label backend', () => {
   it('uses exact-hostname-first parent-domain precedence', async () => {
     const matched = domain({
       configKey: 'dev.xrugc.com',
-      config: domainSnapshot(),
+      config: domainContent(),
     });
     const findFirstDomainConfig = vi.fn().mockResolvedValue(matched);
     const response = await request(app(repository({ findFirstDomainConfig })))
@@ -126,7 +152,7 @@ describe('domain-only white-label backend', () => {
       .query({ domain: 'WWW.D.dev.xrugc.com.' });
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual(domainSnapshot());
+    expect(response.body).toEqual(publicSnapshot());
     expect(findFirstDomainConfig).toHaveBeenCalledWith([
       'www.d.dev.xrugc.com',
       'd.dev.xrugc.com',
@@ -138,7 +164,7 @@ describe('domain-only white-label backend', () => {
   it('normalizes an IDN hostname to ASCII before lookup and response', async () => {
     const idnRecord = domain({
       configKey: 'xn--bcher-kva.example',
-      config: domainSnapshot({ name: 'xn--bcher-kva.example' }),
+      config: domainContent(),
     });
     const findFirstDomainConfig = vi.fn().mockResolvedValue(idnRecord);
     const response = await request(app(repository({ findFirstDomainConfig })))
@@ -148,6 +174,24 @@ describe('domain-only white-label backend', () => {
     expect(response.status).toBe(200);
     expect(response.body.name).toBe('xn--bcher-kva.example');
     expect(findFirstDomainConfig).toHaveBeenCalledWith(['xn--bcher-kva.example']);
+  });
+
+  it('always composes the public name from the authoritative external key', async () => {
+    const legacyRecord = domain({
+      configKey: 'dev.xrugc.com',
+      config: {
+        ...domainContent(),
+        name: 'stale.example.com',
+      } as DomainConfigContent,
+    });
+    const response = await request(app(repository({
+      findFirstDomainConfig: vi.fn().mockResolvedValue(legacyRecord),
+    })))
+      .get('/v1/white-label-configs')
+      .query({ domain: 'dev.xrugc.com' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.name).toBe('dev.xrugc.com');
   });
 
   it('returns an empty JSON object when no domain or parent key exists', async () => {
@@ -167,7 +211,7 @@ describe('domain-only white-label backend', () => {
     ['plugin-disabled', { enabled: false }],
     ['snapshot-inactive', {
       enabled: true,
-      config: domainSnapshot({ is_active: false }),
+      config: domainContent({ is_active: false }),
     }],
   ])('returns empty without parent fallback after a %s higher-priority match', async (_name, overrides) => {
     const findFirstDomainConfig = vi.fn().mockResolvedValue(domain(overrides));
@@ -261,12 +305,28 @@ describe('domain-only white-label backend', () => {
   });
 
   it('lets root create a disabled domain snapshot', async () => {
-    const response = await request(app(repository()))
+    const response = await request(app(repository(), rootSession(), catalogFor()))
       .post('/api/v1/domain-configs')
       .set('Authorization', 'Bearer session-token')
-      .send({ configKey: 'dev.xrugc.com', config: domainSnapshot() });
+      .send({ configKey: 'dev.xrugc.com', config: domainContent() });
     expect(response.status).toBe(201);
     expect(response.headers.location).toBe(`/api/v1/domain-configs/${DOMAIN_ID}`);
+  });
+
+  it('refuses creation without an importable catalog key', async () => {
+    const repo = repository();
+    const unavailable = await request(app(repo))
+      .post('/api/v1/domain-configs')
+      .set('Authorization', 'Bearer session-token')
+      .send({ configKey: 'dev.xrugc.com', config: domainContent() });
+    expect(unavailable.status).toBe(503);
+
+    const unlisted = await request(app(repo, rootSession(), catalogFor('xrugc.com')))
+      .post('/api/v1/domain-configs')
+      .set('Authorization', 'Bearer session-token')
+      .send({ configKey: 'dev.xrugc.com', config: domainContent() });
+    expect(unlisted.status).toBe(422);
+    expect(repo.createDomainConfig).not.toHaveBeenCalled();
   });
 
   it('keeps the domain import catalog root-only', async () => {

@@ -1,7 +1,12 @@
 import { domainToASCII } from 'node:url';
 import { z, type ZodType } from 'zod';
 import { unprocessable } from './errors';
-import type { JsonObject, JsonValue, StaticDomainConfig } from './types';
+import type {
+  DomainConfigContent,
+  JsonObject,
+  JsonValue,
+  StaticDomainConfig,
+} from './types';
 
 const MAX_CONFIG_BYTES = 64 * 1024;
 const MAX_JSON_DEPTH = 12;
@@ -200,7 +205,7 @@ const revisionSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const jsonObjectSchema = z.record(jsonFieldNameSchema, jsonValueSchema);
 
 export function hasLocalDomainConfigData(
-  config: Pick<StaticDomainConfig, 'default_config' | 'configs'>,
+  config: Pick<DomainConfigContent, 'default_config' | 'configs'>,
 ): boolean {
   return Object.keys(config.default_config).length > 0
     || Object.values(config.configs)
@@ -216,17 +221,28 @@ export const staticDomainConfigStructureSchema = rawConfigSecuritySchema.pipe(
     default_config: jsonObjectSchema,
     configs: z.record(jsonFieldNameSchema, jsonObjectSchema),
   })
+    .catchall(jsonValueSchema),
+) as ZodType<StaticDomainConfig>;
+
+export const domainConfigContentSchema = rawConfigSecuritySchema.pipe(
+  z.object({
+    description: z.string().max(191),
+    is_active: z.boolean(),
+    fallback_domain: domainConfigKeySchema.nullable(),
+    default_config: jsonObjectSchema,
+    configs: z.record(jsonFieldNameSchema, jsonObjectSchema),
+  })
     .catchall(jsonValueSchema)
     .superRefine((config, context) => {
-      if (config.description.trim() === '' && config.name.length > 191) {
+      if (Object.prototype.hasOwnProperty.call(config, 'name')) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ['description'],
-          message: 'description is required when config.name exceeds 191 characters',
+          path: ['name'],
+          message: 'name is managed as the external configKey and must not be stored in config JSON',
         });
       }
     }),
-) as ZodType<StaticDomainConfig>;
+) as ZodType<DomainConfigContent>;
 
 export const staticDomainConfigSchema = staticDomainConfigStructureSchema
   .superRefine((config, context) => {
@@ -243,15 +259,19 @@ export const staticDomainConfigSchema = staticDomainConfigStructureSchema
     }
   }) as ZodType<StaticDomainConfig>;
 
-function matchingDomainConfigKey(
-  value: { configKey: string; config: StaticDomainConfig },
+function selfContainedContentForKey(
+  value: { configKey: string; config: DomainConfigContent },
   context: z.RefinementCtx,
 ): void {
-  if (value.configKey !== value.config.name) {
+  if (
+    value.config.fallback_domain !== null
+    && value.config.fallback_domain !== value.configKey
+    && !hasLocalDomainConfigData(value.config)
+  ) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
-      path: ['config', 'name'],
-      message: 'config.name must exactly match configKey',
+      path: ['config', 'fallback_domain'],
+      message: 'an external fallback requires local default_config or configs data; Unity snapshots must be self-contained',
     });
   }
 }
@@ -260,21 +280,38 @@ export const createDomainConfigSchema = z
   .object({
     configKey: domainConfigKeySchema,
     schemaVersion: schemaVersionV1Schema.default(1),
-    config: staticDomainConfigSchema,
+    config: domainConfigContentSchema,
     enabled: z.literal(false).default(false),
   })
   .strict()
-  .superRefine(matchingDomainConfigKey);
+  .superRefine(selfContainedContentForKey);
 
 export const updateDomainConfigSchema = z
   .object({
-    configKey: domainConfigKeySchema,
     schemaVersion: schemaVersionV1Schema,
-    config: staticDomainConfigSchema,
+    config: domainConfigContentSchema,
     revision: revisionSchema,
   })
-  .strict()
-  .superRefine(matchingDomainConfigKey);
+  .strict();
+
+export function assertSelfContainedDomainConfigContent(
+  configKey: string,
+  config: DomainConfigContent,
+): void {
+  if (
+    config.fallback_domain !== null
+    && config.fallback_domain !== configKey
+    && !hasLocalDomainConfigData(config)
+  ) {
+    throw unprocessable(
+      'An external fallback requires local Unity config data',
+      [{
+        path: 'config.fallback_domain',
+        message: 'an external fallback requires local default_config or configs data; Unity snapshots must be self-contained',
+      }],
+    );
+  }
+}
 
 export const revisionBodySchema = z
   .object({

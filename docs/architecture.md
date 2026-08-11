@@ -66,22 +66,22 @@ flowchart LR
 | 字段 | 含义 |
 |---|---|
 | `id` / `domainId` | 管理端内部数字 ID，不进入公开协议 |
-| `domain` / `configKey` | `config_json.name` 的数据库唯一投影 |
+| `domain` / `configKey` | 从主前端目录选择的唯一权威键，创建后不可修改 |
 | `display_name` | `config_json.description` 的只读投影 |
-| `config_json` | 完整、自包含的 `StaticDomainConfig` 快照 |
+| `config_json` | 自包含的白牌内容，不含身份字段 `name` |
 | `schema_version` | 当前只接受 1 |
 | `revision` | 乐观锁与缓存版本 |
 | `is_enabled` | 是否允许公开解析 |
 | 审计字段 | 创建、更新、启停的用户与时间 |
 
-`config_json` 是权威数据；服务端在写入时同步 `domain` 与 `display_name`。修改
-`config.name` 不改变内部 `domainId`。
+身份与内容分离：`domain` 是键的唯一权威来源，`config_json` 是内容的权威来源，服务端
+只从内容同步 `display_name`。更新接口不能修改 `domain`；公开响应时服务端才组装
+`name = configKey`，保持 Unity 和主前端静态格式兼容。
 
 域名 JSON 结构：
 
 ```json
 {
-  "name": "dev.xrugc.com",
   "description": "XR UGC Dev",
   "is_active": true,
   "fallback_domain": "default",
@@ -92,7 +92,8 @@ flowchart LR
 }
 ```
 
-- `name` 必须等于 API 的 `configKey`；
+- 可编辑 JSON 禁止出现 `name`，避免“选择一个键、JSON 又填写另一个键”的双重来源；
+- 新键必须先进入主前端 manifest，再由 root 选择创建；
 - `fallback_domain` 仅保留主前端格式兼容语义；
 - 保存的快照必须已物化 Unity 所需内容，运行时不递归读取 fallback；
 - JSON 不能包含认证凭据或秘密。

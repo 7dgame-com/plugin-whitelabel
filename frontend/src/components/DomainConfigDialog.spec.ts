@@ -1,13 +1,12 @@
 import { defineComponent, h, nextTick, type PropType } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import enUS from '../i18n/locales/en-US'
 import type {
   DomainConfigRecord,
+  DomainConfigContent,
   DomainImportCatalog,
-  StaticDomainConfig,
 } from '../domain/types'
 
 vi.mock('../api/whiteLabelManagement', () => ({
@@ -62,7 +61,7 @@ const SelectStub = defineComponent({
     disabled: Boolean,
     loading: Boolean,
   },
-  emits: ['update:modelValue'],
+  emits: ['update:modelValue', 'change'],
   setup(props, { attrs, emit, slots }) {
     return () =>
       h(
@@ -72,11 +71,11 @@ const SelectStub = defineComponent({
           value: props.modelValue,
           disabled: props.disabled,
           'data-loading': String(props.loading),
-          onChange: (event: Event) =>
-            emit(
-              'update:modelValue',
-              (event.target as HTMLSelectElement).value,
-            ),
+          onChange: (event: Event) => {
+            const value = (event.target as HTMLSelectElement).value
+            emit('update:modelValue', value)
+            emit('change', value)
+          },
         },
         slots.default?.(),
       )
@@ -127,6 +126,7 @@ const JsonEditorStub = defineComponent({
   props: {
     modelValue: { type: String, required: true },
     readOnly: Boolean,
+    configKey: { type: String, default: '' },
   },
   emits: ['update:modelValue'],
   setup(props, { emit }) {
@@ -144,8 +144,7 @@ const JsonEditorStub = defineComponent({
   },
 })
 
-const importedConfig: StaticDomainConfig = {
-  name: 'xrugc-family',
+const importedConfig: DomainConfigContent = {
   description: 'XR UGC agent family',
   is_active: true,
   fallback_domain: null,
@@ -177,7 +176,6 @@ function catalog(configKey: string, source: string): DomainImportCatalog {
         warnings: [],
         config: {
           ...importedConfig,
-          name: configKey,
           description,
         },
       },
@@ -196,7 +194,6 @@ function domainRecord(configKey: string): DomainConfigRecord {
     enabled: false,
     config: {
       ...importedConfig,
-      name: configKey,
       description,
     },
   }
@@ -236,11 +233,7 @@ describe('DomainConfigDialog main-frontend JSON import', () => {
     vi.mocked(getDomainImportCatalog).mockReset()
   })
 
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  it('requires confirmation and fully replaces existing JSON', async () => {
+  it('uses the selected catalog key as the sole identity and loads its content', async () => {
     vi.mocked(getDomainImportCatalog).mockResolvedValue({
       source: 'web/public/config/domains/index.json',
       items: [
@@ -264,33 +257,7 @@ describe('DomainConfigDialog main-frontend JSON import', () => {
         },
       ],
     })
-    const confirm = vi
-      .spyOn(ElMessageBox, 'confirm')
-      .mockResolvedValue(
-        { value: '', action: 'confirm' } as unknown as Awaited<
-          ReturnType<typeof ElMessageBox.confirm>
-        >,
-      )
-    const success = vi.spyOn(ElMessage, 'success').mockImplementation(() => ({
-      close: () => undefined,
-    }) as ReturnType<typeof ElMessage.success>)
-    const record: DomainConfigRecord = {
-      domainId: 8,
-      configKey: 'old-family',
-      description: 'Old family',
-      schemaVersion: 1,
-      revision: 2,
-      enabled: false,
-      config: {
-        name: 'old-family',
-        description: 'Old family',
-        is_active: true,
-        fallback_domain: null,
-        default_config: { legacy: true },
-        configs: {},
-      },
-    }
-    const wrapper = mountDialog(record)
+    const wrapper = mountDialog()
 
     await wrapper.setProps({ visible: true })
     await flushPromises()
@@ -312,24 +279,26 @@ describe('DomainConfigDialog main-frontend JSON import', () => {
     expect(wrapper.get('[data-testid="domain-import-details"]').text()).toContain(
       'fallback was materialized',
     )
-
-    await wrapper.get('[data-testid="domain-import-button"]').trigger('click')
-    await flushPromises()
-
-    expect(confirm).toHaveBeenCalledOnce()
     expect(
       (wrapper.get('[data-testid="json-editor"]').element as HTMLTextAreaElement)
         .value,
     ).toBe(JSON.stringify(importedConfig, null, 2))
-    expect(wrapper.get('[data-testid="json-editor"]').text()).not.toContain(
-      'legacy',
+    expect(wrapper.find('[data-testid="domain-import-button"]').exists()).toBe(
+      false,
     )
-    expect(success).toHaveBeenCalledOnce()
+
+    const saveButton = wrapper.findAll('button').at(-1)
+    expect(saveButton?.attributes('disabled')).toBeUndefined()
+    await saveButton?.trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('submit')?.[0]).toEqual([
+      { configKey: 'xrugc-family', config: importedConfig },
+    ])
 
     wrapper.unmount()
   })
 
-  it('keeps the manual editor usable when catalog loading fails', async () => {
+  it('blocks creation when the catalog cannot provide the identity key', async () => {
     vi.mocked(getDomainImportCatalog).mockRejectedValue(
       new Error('catalog unavailable'),
     )
@@ -342,14 +311,11 @@ describe('DomainConfigDialog main-frontend JSON import', () => {
       true,
     )
     const editor = wrapper.get('[data-testid="json-editor"]')
-    await editor.setValue('{"manual":true}')
-    await nextTick()
-    expect((editor.element as HTMLTextAreaElement).value).toBe(
-      '{"manual":true}',
+    expect(editor.attributes('readonly')).toBe('')
+    expect(wrapper.find('[data-testid="domain-import-button"]').exists()).toBe(
+      false,
     )
-    expect(
-      wrapper.get('[data-testid="domain-import-button"]').attributes('disabled'),
-    ).toBeDefined()
+    expect(wrapper.findAll('button').at(-1)?.attributes('disabled')).toBe('')
 
     wrapper.unmount()
   })
@@ -364,10 +330,14 @@ describe('DomainConfigDialog main-frontend JSON import', () => {
     expect(wrapper.find('[data-testid="domain-import-select"]').exists()).toBe(
       false,
     )
-    expect(
-      (wrapper.get('[data-testid="json-editor"]').element as HTMLTextAreaElement)
-        .value,
-    ).toContain('readonly.example.com')
+    expect(wrapper.get('.domain-key-summary').text()).toContain(
+      'readonly.example.com',
+    )
+    const editorValue = (
+      wrapper.get('[data-testid="json-editor"]').element as HTMLTextAreaElement
+    ).value
+    expect(editorValue).toContain('readonly.example.com description')
+    expect(editorValue).not.toContain('"name"')
     expect(wrapper.get('[data-testid="json-editor"]').attributes('readonly')).toBe(
       '',
     )
@@ -433,40 +403,30 @@ describe('DomainConfigDialog main-frontend JSON import', () => {
     wrapper.unmount()
   })
 
-  it('ignores an older catalog response after switching records', async () => {
-    const stale = deferred<DomainImportCatalog>()
-    const current = deferred<DomainImportCatalog>()
-    vi.mocked(getDomainImportCatalog)
-      .mockReturnValueOnce(stale.promise)
-      .mockReturnValueOnce(current.promise)
-    const wrapper = mountDialog()
+  it('keeps an existing external key immutable without loading the catalog', async () => {
+    const wrapper = mountDialog(domainRecord('edited-family'))
 
     await wrapper.setProps({ visible: true })
-    await wrapper.setProps({ record: domainRecord('edited-family') })
-
-    current.resolve(catalog('edited-family', 'edited-source'))
-    await flushPromises()
-    await wrapper
-      .get('[data-testid="domain-import-select"]')
-      .setValue('edited-family')
-    await nextTick()
-
-    stale.resolve(catalog('stale-family', 'stale-source'))
     await flushPromises()
 
-    expect(wrapper.findAll('option').map((option) => option.attributes('value')))
-      .toEqual(['edited-family'])
-    expect(wrapper.get('[data-testid="domain-import-details"]').text()).toContain(
-      'edited-source',
+    expect(getDomainImportCatalog).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="domain-import-select"]').exists()).toBe(
+      false,
     )
-    expect(wrapper.get('[data-testid="domain-import-details"]').text()).not.toContain(
-      'stale-source',
-    )
-    expect(
-      wrapper.get('[data-testid="domain-import-select"]').attributes(
-        'data-loading',
-      ),
-    ).toBe('false')
+    expect(wrapper.get('.domain-key-summary').text()).toContain('edited-family')
+
+    const editor = wrapper.get('[data-testid="json-editor"]')
+    const editedConfig: DomainConfigContent = {
+      ...importedConfig,
+      description: 'Edited content only',
+    }
+    await editor.setValue(JSON.stringify(editedConfig))
+    await wrapper.findAll('button').at(-1)?.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.emitted('submit')?.[0]).toEqual([
+      { configKey: 'edited-family', config: editedConfig },
+    ])
 
     wrapper.unmount()
   })

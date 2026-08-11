@@ -2,7 +2,11 @@ import Ajv, {
   type ErrorObject,
   type ValidateFunction,
 } from 'ajv'
-import type { JsonObject, StaticDomainConfig } from './types'
+import type {
+  DomainConfigContent,
+  JsonObject,
+  StaticDomainConfig,
+} from './types'
 
 export type JsonValidationIssueCode =
   | 'syntax'
@@ -67,10 +71,9 @@ const SENSITIVE_KEY_FRAGMENTS = [
  * Mirrors web/public/config/domains/*.json. Nested payloads deliberately stay
  * open so the plugin does not take ownership of the main frontend's settings.
  */
-const domainSchema = {
+const domainContentSchema = {
   type: 'object',
   required: [
-    'name',
     'description',
     'is_active',
     'fallback_domain',
@@ -78,11 +81,6 @@ const domainSchema = {
     'configs',
   ],
   properties: {
-    name: {
-      type: 'string',
-      maxLength: 253,
-      pattern: DOMAIN_CONFIG_KEY_PATTERN,
-    },
     description: { type: 'string', maxLength: 191 },
     is_active: { type: 'boolean' },
     fallback_domain: {
@@ -110,8 +108,22 @@ const domainSchema = {
   additionalProperties: true,
 } as const
 
+const staticDomainSchema = {
+  ...domainContentSchema,
+  required: ['name', ...domainContentSchema.required],
+  properties: {
+    name: {
+      type: 'string',
+      maxLength: 253,
+      pattern: DOMAIN_CONFIG_KEY_PATTERN,
+    },
+    ...domainContentSchema.properties,
+  },
+} as const
+
 const ajv = new Ajv({ allErrors: true, strict: true })
-const domainValidator: ValidateFunction = ajv.compile(domainSchema)
+const domainContentValidator: ValidateFunction = ajv.compile(domainContentSchema)
+const staticDomainValidator: ValidateFunction = ajv.compile(staticDomainSchema)
 
 function isJsonObject(value: unknown): value is JsonObject {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -329,42 +341,18 @@ function validateSecureJsonObject<T extends JsonObject = JsonObject>(
   return { valid: true, value: value as T, issues: [] }
 }
 
-export function validateJsonObjectValue<
-  T extends StaticDomainConfig = StaticDomainConfig,
->(value: unknown): JsonValidationResult<T> {
-  const secured = validateSecureJsonObject<T>(value)
-  if (!secured.valid) return secured
-
-  if (!domainValidator(secured.value)) {
-    return {
-      valid: false,
-      value: null,
-      issues: (domainValidator.errors ?? []).map((error) => ({
-        code: 'schema' as const,
-        message: issueMessage(error),
-        path: issuePath(error),
-      })),
-    }
-  }
-
-  const config = secured.value
+function domainSemanticsIssues(
+  config: DomainConfigContent,
+  configKey?: string,
+): JsonValidationIssue[] {
   const domainIssues: JsonValidationIssue[] = []
-  if (config.description.trim() === '' && config.name.length > 191) {
-    domainIssues.push({
-      code: 'schema',
-      message:
-        'description is required when config.name exceeds 191 characters',
-      path: '/description',
-    })
-  }
-
   const hasDefaultConfig = Object.keys(config.default_config).length > 0
   const hasLocalizedConfig = Object.values(config.configs).some(
     (localizedConfig) => Object.keys(localizedConfig).length > 0,
   )
   if (
     config.fallback_domain !== null &&
-    config.fallback_domain !== config.name &&
+    config.fallback_domain !== configKey &&
     !hasDefaultConfig &&
     !hasLocalizedConfig
   ) {
@@ -375,6 +363,42 @@ export function validateJsonObjectValue<
       path: '/fallback_domain',
     })
   }
+  return domainIssues
+}
+
+export function validateJsonObjectValue(
+  value: unknown,
+  configKey?: string,
+): JsonValidationResult<DomainConfigContent> {
+  const secured = validateSecureJsonObject<DomainConfigContent>(value)
+  if (!secured.valid) return secured
+
+  if (Object.prototype.hasOwnProperty.call(secured.value, 'name')) {
+    return {
+      valid: false,
+      value: null,
+      issues: [{
+        code: 'schema',
+        message: '/name is managed outside JSON as configKey',
+        path: '/name',
+      }],
+    }
+  }
+
+  if (!domainContentValidator(secured.value)) {
+    return {
+      valid: false,
+      value: null,
+      issues: (domainContentValidator.errors ?? []).map((error) => ({
+        code: 'schema' as const,
+        message: issueMessage(error),
+        path: issuePath(error),
+      })),
+    }
+  }
+
+  const config = secured.value
+  const domainIssues = domainSemanticsIssues(config, configKey)
 
   if (domainIssues.length > 0) {
     return {
@@ -387,9 +411,32 @@ export function validateJsonObjectValue<
   return { valid: true, value: config, issues: [] }
 }
 
+export function validateStaticDomainConfigValue(
+  value: unknown,
+): JsonValidationResult<StaticDomainConfig> {
+  const secured = validateSecureJsonObject<StaticDomainConfig>(value)
+  if (!secured.valid) return secured
+  if (!staticDomainValidator(secured.value)) {
+    return {
+      valid: false,
+      value: null,
+      issues: (staticDomainValidator.errors ?? []).map((error) => ({
+        code: 'schema' as const,
+        message: issueMessage(error),
+        path: issuePath(error),
+      })),
+    }
+  }
+  const domainIssues = domainSemanticsIssues(secured.value, secured.value.name)
+  return domainIssues.length > 0
+    ? { valid: false, value: null, issues: domainIssues }
+    : { valid: true, value: secured.value, issues: [] }
+}
+
 export function validateJsonObjectText(
   text: string,
-): JsonValidationResult<StaticDomainConfig> {
+  configKey?: string,
+): JsonValidationResult<DomainConfigContent> {
   let parsed: unknown
   try {
     parsed = JSON.parse(text) as unknown
@@ -408,7 +455,7 @@ export function validateJsonObjectText(
     }
   }
 
-  return validateJsonObjectValue(parsed)
+  return validateJsonObjectValue(parsed, configKey)
 }
 
 export function formatJsonObjectText(

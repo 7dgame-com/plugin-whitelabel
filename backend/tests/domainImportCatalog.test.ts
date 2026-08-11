@@ -30,6 +30,11 @@ function entry(domainConfig: StaticDomainConfig) {
   };
 }
 
+function content(domainConfig: StaticDomainConfig) {
+  const { name: _configKey, ...value } = domainConfig;
+  return value;
+}
+
 function manifest(domains: unknown[]) {
   return { schemaVersion: 1, domains };
 }
@@ -69,7 +74,7 @@ describe('main frontend domain import catalog', () => {
         importable: true,
         materializedFrom: [],
         warnings: [],
-        config: sourceConfig,
+        config: content(sourceConfig),
       }],
     });
     expect(fetcher).toHaveBeenCalledTimes(1);
@@ -117,7 +122,6 @@ describe('main frontend domain import catalog', () => {
       importable: true,
       materializedFrom: ['middle.example', 'base.example'],
       config: {
-        name: source.name,
         description: source.description,
         is_active: source.is_active,
         fallback_domain: source.fallback_domain,
@@ -173,7 +177,6 @@ describe('main frontend domain import catalog', () => {
       importable: true,
       materializedFrom: [middle.name, base.name],
       config: {
-        name: source.name,
         description: source.description,
         is_active: source.is_active,
         fallback_domain: source.fallback_domain,
@@ -385,7 +388,7 @@ describe('main frontend domain import catalog', () => {
     const items = (await catalog.list()).items;
     expect(items.find((item) => item.configKey === good.name)).toMatchObject({
       importable: true,
-      config: good,
+      config: content(good),
     });
     for (const configKey of [
       mismatchedName.configKey,
