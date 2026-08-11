@@ -80,7 +80,7 @@ services:
       DB_CONNECTION_LIMIT: "10"
       MAIN_API_BASE_URL: https://api.xrteeth.com
       MAIN_API_TIMEOUT_MS: "5000"
-      MAIN_FRONTEND_PUBLIC_BASE_URL: https://xrugc.com
+      MAIN_FRONTEND_PUBLIC_BASE_URL: https://d.xrugc.com
       DOMAIN_CATALOG_TIMEOUT_MS: "3000"
     networks:
       - whitelabel_private
