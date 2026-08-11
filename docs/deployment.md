@@ -63,6 +63,10 @@ port.7dgame.com
 `proxy` 网络；后端和 MySQL 不发布主机端口。初始化容器会幂等地创建
 `white_label_domain_config` 表。
 
+生产导入目录固定读取 `https://d.xrugc.com/config/domains/manifest.json`。
+`https://xrugc.com` 是官网入口，会对未知路径返回 HTML，不能作为
+`MAIN_FRONTEND_PUBLIC_BASE_URL`。
+
 数据库 root 密码和插件账号密码只放在 Portainer stack environment 中，
 不写入 Compose 或仓库。不允许使用主业务库账号、主 Redis 或主应用数据卷。
 
