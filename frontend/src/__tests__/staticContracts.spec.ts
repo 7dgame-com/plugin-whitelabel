@@ -37,6 +37,17 @@ describe('domain-only deployment contracts', () => {
     expect(entrypoint).toContain('error_page 502 503 504 = @backend_failover')
   })
 
+  it('loads the production import catalog from the XRUGC workbench origin', () => {
+    const productionCompose = read('../../../deploy/production.yml')
+
+    expect(productionCompose).toContain(
+      'MAIN_FRONTEND_PUBLIC_BASE_URL: https://d.xrugc.com',
+    )
+    expect(productionCompose).not.toContain(
+      'MAIN_FRONTEND_PUBLIC_BASE_URL: https://xrugc.com',
+    )
+  })
+
   it('documents only the access-domain to Unity JSON model', () => {
     const readme = read('../../README.md')
     expect(readme).toContain('访问域名 → 配置键 → Unity 白牌 JSON')
